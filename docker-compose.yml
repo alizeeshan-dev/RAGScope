@@ -1,0 +1,51 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ragscope
+      POSTGRES_USER: ragscope
+      POSTGRES_PASSWORD: ragscope
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ragscope -d ragscope"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      RAGSCOPE_ENVIRONMENT: ${RAGSCOPE_ENVIRONMENT:-development}
+      RAGSCOPE_DATABASE_URL: ${RAGSCOPE_DATABASE_URL:-postgresql+psycopg://ragscope:ragscope@db:5432/ragscope}
+      RAGSCOPE_ARTIFACT_ROOT: ${RAGSCOPE_ARTIFACT_ROOT:-/var/lib/ragscope/artifacts}
+      RAGSCOPE_MAX_UPLOAD_BYTES: ${RAGSCOPE_MAX_UPLOAD_BYTES:-52428800}
+      RAGSCOPE_CORS_ORIGINS: ${RAGSCOPE_CORS_ORIGINS:-http://localhost:3000}
+      RAGSCOPE_EMBEDDING_PROVIDER: ${RAGSCOPE_EMBEDDING_PROVIDER:-fake}
+      RAGSCOPE_EMBEDDING_MODEL: ${RAGSCOPE_EMBEDDING_MODEL:-fake-hash-embedding-v1}
+      RAGSCOPE_EMBEDDING_DIMENSION: ${RAGSCOPE_EMBEDDING_DIMENSION:-64}
+    ports:
+      - "8000:8000"
+    volumes:
+      - artifact-data:/var/lib/ragscope/artifacts
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  postgres-data:
+  artifact-data:
