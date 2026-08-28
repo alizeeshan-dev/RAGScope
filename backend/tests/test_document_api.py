@@ -65,7 +65,7 @@ def test_document_api_upload_parse_inspect_and_chunk(tmp_path: Path) -> None:
         assert duplicate_response.status_code == 409
         assert duplicate_response.json()["error"]["code"] == "DUPLICATE_DOCUMENT"
 
-        parse_response = client.post(f"/api/v1/documents/{document_id}/parse")
+        parse_response = client.post(f"/api/v1/documents/{document_id}/parse?wait=true")
         assert parse_response.status_code == 200
         assert parse_response.json()["parse_status"] == "ready"
         elements = client.get(f"/api/v1/documents/{document_id}/elements").json()
@@ -75,7 +75,7 @@ def test_document_api_upload_parse_inspect_and_chunk(tmp_path: Path) -> None:
         assert any(element["element_type"] == "table" for element in elements)
 
         chunk_response = client.post(
-            f"/api/v1/corpus-versions/{version_id}/chunk",
+            f"/api/v1/corpus-versions/{version_id}/chunk?wait=true",
             json={"strategy": "fixed", "target_tokens": 8, "overlap_tokens": 2},
         )
         assert chunk_response.status_code == 200
@@ -99,7 +99,9 @@ def test_document_api_upload_parse_inspect_and_chunk(tmp_path: Path) -> None:
         ).json()
         assert [document["id"] for document in documents] == [document_id]
 
-        index_response = client.post(f"/api/v1/corpus-versions/{version_id}/index")
+        index_response = client.post(
+            f"/api/v1/corpus-versions/{version_id}/index?wait=true"
+        )
         assert index_response.status_code == 200
         assert index_response.json()["status"] == "succeeded"
         index_status = client.get(

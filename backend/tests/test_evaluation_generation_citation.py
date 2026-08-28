@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import typing
 
 import pytest
 from backend.app.evaluation.citation_verifier import DeterministicCitationVerifier
@@ -20,9 +21,38 @@ from backend.app.evaluation.metrics.generation import (
     evaluate_generation_metrics,
     evaluate_with_structured_judge,
 )
+from backend.app.evaluation.schemas import HumanMetricCreate
+from pydantic import ValidationError
 
 
-import typing
+def test_human_review_contract_accepts_queue_metrics_and_validates_ranges() -> None:
+    for name in (
+        "answer_correctness",
+        "answer_completeness",
+        "appropriate_abstention",
+        "false_premise_recognition",
+        "claim_support_rate",
+        "citation_precision",
+    ):
+        assert HumanMetricCreate(
+            metric_name=name,
+            metric_value=1.0,
+            reviewer_label="reviewer",
+        ).metric_name == name
+
+    with pytest.raises(ValidationError):
+        HumanMetricCreate(
+            metric_name="answer_correctness",
+            metric_value=1.1,
+            reviewer_label="reviewer",
+        )
+    with pytest.raises(ValidationError):
+        HumanMetricCreate(
+            metric_name="unsupported_claim_count.human",
+            metric_value=1.5,
+            reviewer_label="reviewer",
+        )
+
 
 def _values(outputs: typing.Sequence[typing.Any]) -> dict[str, float | None]:
     return {output.name: output.value for output in outputs}

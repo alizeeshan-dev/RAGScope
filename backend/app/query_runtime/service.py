@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -36,6 +37,7 @@ from backend.app.db.models import (
     BenchmarkVersionStatus,
     CorpusVersion,
     CorpusVersionStatus,
+    ExperimentRun,
     IndexStatus,
     IndexType,
     PipelineConfiguration,
@@ -104,7 +106,18 @@ class QueryOrchestrator:
         self.settings = settings or get_settings()
         self.artifact_store = artifact_store or LocalArtifactStore(self.settings.artifact_root)
 
-    def execute(self, payload: QueryRunCreate, *, raise_on_failure: bool = True) -> QueryRun:
+    def execute(
+        self,
+        payload: QueryRunCreate,
+        *,
+        raise_on_failure: bool = True,
+        experiment_run_id: UUID | None = None,
+        experiment_attempt_number: int | None = None,
+    ) -> QueryRun:
+        if (experiment_run_id is None) is not (experiment_attempt_number is None):
+            raise ValueError(
+                "experiment_run_id and experiment_attempt_number must be provided together"
+            )
         version, pipeline = self._validate(payload)
         processor = QueryProcessor(
             QueryProcessingConfiguration.model_validate(pipeline.query_processing_configuration)
@@ -135,6 +148,8 @@ class QueryOrchestrator:
             classification={},
             extracted_metadata={},
             started_at=now,
+            experiment_run_id=experiment_run_id,
+            experiment_attempt_number=experiment_attempt_number,
         )
         self.session.add(run)
         self.session.flush()
@@ -534,6 +549,7 @@ class QueryOrchestrator:
             self._apply_configured_cost(run, generation_snapshot)
             self.session.commit()
             self.session.refresh(run)
+            self.persist_trace_export_safely(run)
             return run
         except Exception as exc:
             failure_code = self._failure_code(run, stage, exc)
@@ -580,6 +596,7 @@ class QueryOrchestrator:
                 ) from database_exc
             if not raise_on_failure:
                 self.session.refresh(run)
+                self.persist_trace_export_safely(run)
                 return run
             raise DomainError(
                 run.failure_code or "DATABASE_FAILURE",
@@ -793,12 +810,15 @@ class QueryOrchestrator:
             ),
         )
 
-    @staticmethod
-    def _apply_configured_cost(run: QueryRun, configuration: dict[str, Any]) -> None:
+    def _apply_configured_cost(self, run: QueryRun, configuration: dict[str, Any]) -> None:
         if run.estimated_cost is not None:
             return
         input_price = configuration.get("input_price_per_million_tokens")
         output_price = configuration.get("output_price_per_million_tokens")
+        if input_price is None:
+            input_price = self.settings.generation_input_price_per_million
+        if output_price is None:
+            output_price = self.settings.generation_output_price_per_million
         if (
             run.input_tokens is not None
             and run.output_tokens is not None
@@ -896,6 +916,52 @@ class QueryOrchestrator:
         self.session.add(artifact)
         self.session.flush()
         return artifact
+
+    def persist_trace_export_safely(self, run: QueryRun) -> None:
+        """Persist the exact observable trace without changing the run outcome."""
+
+        from backend.app.tracing.export import export_observable_trace
+
+        try:
+            trace = export_observable_trace(self.session, run.id)
+            payload = trace.model_dump_json(
+                indent=None,
+                exclude_none=False,
+            ).encode("utf-8")
+            descriptor = self.artifact_store.put_bytes(
+                payload,
+                media_type="application/json",
+                original_filename=f"query-{run.id}-trace.json",
+                producing_operation="observable_trace_export",
+                configuration={"schema_version": trace.schema_version},
+            )
+            experiment_id: UUID | None = None
+            if run.experiment_run_id is not None:
+                cell = self.session.get(ExperimentRun, run.experiment_run_id)
+                experiment_id = cell.experiment_id if cell is not None else None
+            self.session.add(
+                Artifact(
+                    id=descriptor.id,
+                    corpus_version_id=run.corpus_version_id,
+                    document_id=None,
+                    job_id=None,
+                    query_run_id=run.id,
+                    trace_span_id=None,
+                    experiment_id=experiment_id,
+                    artifact_type="observable-trace.json",
+                    content_hash=descriptor.content_hash,
+                    media_type=descriptor.media_type,
+                    original_filename=descriptor.original_filename,
+                    producing_operation=descriptor.producing_operation,
+                    producer_version=trace.schema_version,
+                    configuration=descriptor.configuration,
+                    storage_key=descriptor.storage_key,
+                    size_bytes=descriptor.size_bytes,
+                )
+            )
+            self.session.commit()
+        except Exception:  # noqa: BLE001 - trace persistence cannot rewrite run status
+            self.session.rollback()
 
     @staticmethod
     def _failure_code(run: QueryRun, stage: str, exc: Exception) -> str:

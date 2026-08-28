@@ -18,10 +18,11 @@ export default function Home() {
 
   async function createCorpus(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError("");
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     try {
       await api.createCorpus({ name: String(form.get("name")), description: String(form.get("description") ?? ""), domain: String(form.get("domain") ?? "") });
-      event.currentTarget.reset(); await refresh();
+      formElement.reset(); await refresh();
     } catch (err) { setError(err instanceof Error ? err.message : "Could not create corpus"); }
     finally { setBusy(false); }
   }
@@ -29,7 +30,7 @@ export default function Home() {
   const versions = corpora.flatMap((corpus) => corpus.versions ?? []);
   return (
     <>
-      <header className="topbar"><div className="brand"><span className="brand-mark">R</span><div><strong>RAGScope</strong><small>Research runtime</small></div></div><nav className="top-nav"><a href="/laboratory">Query Laboratory</a><a href="/comparisons">Pipeline Comparison</a><a href="/datasets">Datasets</a><a href="/benchmarks">Benchmarks</a><a href="/runtime">Pipelines</a></nav></header>
+      <header className="topbar"><div className="brand"><span className="brand-mark">R</span><div><strong>RAGScope</strong><small>Research runtime</small></div></div><nav className="top-nav"><a href="/laboratory">Query Laboratory</a><a href="/comparisons">Pipeline Comparison</a><a href="/datasets">Datasets</a><a href="/benchmarks">Benchmarks</a><a href="/experiments">Experiments</a><a href="/runtime">Pipelines</a></nav></header>
       <main id="main" className="shell">
         <section className="hero"><div><p className="eyebrow">Observable by construction</p><h1>Build evidence you can inspect.</h1><p>Turn scientific sources into frozen, provenance-preserving lexical and dense indexes.</p></div><div className="metrics"><div><strong>{corpora.length}</strong><span>Corpora</span></div><div><strong>{versions.filter((v) => v.status === "ready").length}</strong><span>Ready versions</span></div><div><strong>{versions.reduce((n, v) => n + v.document_count, 0)}</strong><span>Documents</span></div></div></section>
         {error && <div role="alert" className="alert">{error}</div>}

@@ -10,6 +10,7 @@ import type {
   RunClaim,
   RunContextSource,
   RunRetrievalResult,
+  RouterConfiguration,
 } from "@/lib/types";
 
 const PROVIDER_MODELS: Record<string, string> = {
@@ -21,23 +22,28 @@ const PROVIDER_MODELS: Record<string, string> = {
 export default function RuntimePage() {
   const [corpora, setCorpora] = useState<Corpus[]>([]);
   const [pipelines, setPipelines] = useState<PipelineConfiguration[]>([]);
+  const [routers, setRouters] = useState<RouterConfiguration[]>([]);
   const [run, setRun] = useState<QueryRun | null>(null);
   const [retrieval, setRetrieval] = useState<RunRetrievalResult[]>([]);
   const [claims, setClaims] = useState<RunClaim[]>([]);
   const [sources, setSources] = useState<RunContextSource[]>([]);
   const [provider, setProvider] = useState("fake");
+  const [executionMode, setExecutionMode] = useState<"fixed" | "adaptive">("fixed");
+  const [rerankerProvider, setRerankerProvider] = useState("fake");
   const [model, setModel] = useState(PROVIDER_MODELS.fake);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
 
   const refresh = useCallback(async () => {
     try {
-      const [storedCorpora, storedPipelines] = await Promise.all([
+      const [storedCorpora, storedPipelines, storedRouters] = await Promise.all([
         api.listCorpora(),
         api.listPipelines(),
+        api.listRouterConfigurations(),
       ]);
       setCorpora(storedCorpora);
       setPipelines(storedPipelines);
+      setRouters(storedRouters);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Load failed");
     }
@@ -51,13 +57,17 @@ export default function RuntimePage() {
     event.preventDefault();
     setBusy("pipeline");
     setError("");
-    const data = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const data = new FormData(form);
     const topK = Number(data.get("top_k"));
     const rerankEnabled = data.get("rerank") === "on";
     try {
       await api.createPipeline({
         name: String(data.get("name")),
         version: Number(data.get("version")),
+        execution_mode: executionMode,
+        router_configuration_id: executionMode === "adaptive" ? String(data.get("router_configuration")) : null,
+        adaptive_configuration: { allowed_retrieval_modes: ["none", "lexical", "dense", "hybrid"], allow_rewriting: true, allow_reranking: true, maximum_candidate_count: Number(data.get("candidates")), maximum_context_budget: Number(data.get("budget")) },
         retrieval_mode: String(data.get("mode")),
         lexical_configuration: {
           top_k: topK,
@@ -77,8 +87,11 @@ export default function RuntimePage() {
         },
         reranker_configuration: {
           enabled: rerankEnabled,
-          provider: "fake",
-          model: "fake-token-overlap-reranker-v1",
+          provider: rerankerProvider,
+          model: String(data.get("reranker_model")),
+          model_revision: data.get("reranker_revision") ? String(data.get("reranker_revision")) : null,
+          device: data.get("reranker_device") ? String(data.get("reranker_device")) : null,
+          local_files_only: true,
           input_candidate_count: Number(data.get("candidates")),
           final_count: Number(data.get("rerank_final")),
         },
@@ -108,8 +121,10 @@ export default function RuntimePage() {
           grounded_generation: { prompt_id: "grounded-answer", version: 1 },
         },
       });
-      event.currentTarget.reset();
+      form.reset();
       setProvider("fake");
+      setExecutionMode("fixed");
+      setRerankerProvider("fake");
       setModel(PROVIDER_MODELS.fake);
       await refresh();
     } catch (reason) {
@@ -117,6 +132,17 @@ export default function RuntimePage() {
     } finally {
       setBusy("");
     }
+  }
+
+  async function createRouter(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setBusy("router"); setError("");
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    try {
+      await api.createRouterConfiguration({ name: String(data.get("router_name")), version: Number(data.get("router_version")), configuration: {} });
+      form.reset(); await refresh();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Router creation failed"); }
+    finally { setBusy(""); }
   }
 
   async function runQuery(event: FormEvent<HTMLFormElement>) {
@@ -167,7 +193,7 @@ export default function RuntimePage() {
           <span className="brand-mark">R</span>
           <div><strong>RAGScope</strong><small>Fixed pipeline runtime</small></div>
         </a>
-        <span className="phase">No adaptive routing</span>
+        <span className="phase">Fixed and adaptive routing</span>
       </header>
       <main id="main" className="shell">
         <a className="back" href="/">← Corpora</a>
@@ -188,6 +214,8 @@ export default function RuntimePage() {
                 <label>Name<input name="name" required defaultValue="Hybrid baseline" /></label>
                 <label>Version<input name="version" type="number" min="1" defaultValue="1" required /></label>
               </div>
+              <label>Execution mode<select value={executionMode} onChange={(event)=>setExecutionMode(event.target.value as "fixed" | "adaptive")}><option value="fixed">Fixed</option><option value="adaptive">Adaptive</option></select></label>
+              {executionMode === "adaptive" && <label>Frozen router<select name="router_configuration" required defaultValue=""><option value="" disabled>Select router</option>{routers.filter((item)=>item.frozen_at).map((item)=><option key={item.id} value={item.id}>{item.name} v{item.version}</option>)}</select></label>}
               <label>
                 Retrieval mode
                 <select name="mode" defaultValue="hybrid">
@@ -204,13 +232,15 @@ export default function RuntimePage() {
               </div>
               <div className="check-row">
                 <label><input name="rewrite" type="checkbox" /> Rewrite query</label>
-                <label><input name="rerank" type="checkbox" /> Fake reranker</label>
+                <label><input name="rerank" type="checkbox" /> Enable reranker</label>
                 <label><input name="dedupe" type="checkbox" defaultChecked /> Deduplicate</label>
               </div>
               <div className="form-row">
                 <label>Reranker final<input name="rerank_final" type="number" min="1" defaultValue="8" /></label>
                 <label>Context tokens<input name="budget" type="number" min="1" defaultValue="2048" /></label>
               </div>
+              <div className="form-row"><label>Reranker provider<select value={rerankerProvider} onChange={(event)=>setRerankerProvider(event.target.value)}><option value="fake">Deterministic fake</option><option value="sentence_transformers_cross_encoder">Local CrossEncoder</option></select></label><label>Reranker model<input name="reranker_model" defaultValue={rerankerProvider === "fake" ? "fake-token-overlap-reranker-v1" : "cross-encoder/ms-marco-MiniLM-L-6-v2"}/></label></div>
+              {rerankerProvider !== "fake" && <div className="form-row"><label>Pinned model revision<input name="reranker_revision" required placeholder="Hugging Face commit SHA"/></label><label>Device<input name="reranker_device" placeholder="cpu or cuda" defaultValue="cpu"/></label></div>}
               <div className="form-row">
                 <label>
                   Provider
@@ -239,6 +269,8 @@ export default function RuntimePage() {
               </div>
               <button disabled={Boolean(busy)}>{busy === "pipeline" ? "Saving…" : "Save pipeline"}</button>
             </form>
+            <form className="runtime-form" onSubmit={createRouter}><h3>Adaptive router configuration</h3><div className="form-row"><label>Name<input name="router_name" defaultValue="P5 deterministic router" required/></label><label>Version<input name="router_version" type="number" min="1" defaultValue="1"/></label></div><button className="secondary" disabled={Boolean(busy)}>{busy === "router" ? "Saving…" : "Create router draft"}</button></form>
+            <div className="pipeline-list">{routers.map((item)=><div key={item.id}><span><strong>{item.name} v{item.version}</strong><small>{item.router_version} · deterministic</small></span>{item.frozen_at?<StatusBadge status="frozen"/>:<button className="secondary" onClick={()=>void api.freezeRouterConfiguration(item.id).then(refresh).catch((reason:Error)=>setError(reason.message))}>Freeze router</button>}</div>)}</div>
             <div className="pipeline-list">
               {pipelines.map((pipeline) => (
                 <div key={pipeline.id}>

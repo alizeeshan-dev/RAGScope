@@ -50,7 +50,8 @@ export default function DatasetCatalogPage() {
 
   async function extract(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const data = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const data = new FormData(form);
     setBusy("extract"); setError(""); setMessage("");
     try {
       const model = String(data.get("model") ?? "").trim();
@@ -59,8 +60,9 @@ export default function DatasetCatalogPage() {
         provider: String(data.get("provider")) as "fake" | "gemini" | "openai_compatible",
         ...(model ? { model } : {}),
       });
-      setMessage(`Extraction job ${job.job_id ?? job.id ?? "created"} is ${job.status}. The catalog will show validated records when processing finishes.`);
-      event.currentTarget.reset(); setExtractDocumentId("");
+      const jobId = "job_id" in job ? job.job_id : job.id;
+      setMessage(`Extraction job ${jobId} is ${job.status}. The catalog will show validated records when processing finishes.`);
+      form.reset(); setExtractDocumentId("");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Extraction could not be started"); }
     finally { setBusy(""); }
   }

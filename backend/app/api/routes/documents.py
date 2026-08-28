@@ -9,7 +9,7 @@ from functools import lru_cache
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select
@@ -27,9 +27,10 @@ from backend.app.documents.chunkers import (
     StructureAwareChunker,
     StructureAwareConfiguration,
 )
-from backend.app.documents.errors import DocumentParseError
-from backend.app.documents.service import ChunkService, DocumentService
-from backend.app.jobs.service import complete_job, create_job, fail_job, start_job
+from backend.app.documents.service import DocumentService
+from backend.app.indexing.api_schemas import OperationAccepted
+from backend.app.jobs.api_contract import receipt, run_inline_for_bounded_wait
+from backend.app.jobs.service import create_job
 
 router = APIRouter(tags=["documents"])
 
@@ -249,17 +250,22 @@ def get_document_elements(
     )
 
 
-@router.post("/documents/{document_id}/parse", response_model=DocumentRead)
+@router.post(
+    "/documents/{document_id}/parse",
+    response_model=DocumentRead | OperationAccepted,
+)
 def parse_document(
     document_id: UUID,
+    response: Response,
     session: Annotated[Session, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
     artifact_store: Annotated[LocalArtifactStore, Depends(get_artifact_store)],
-) -> SourceDocument:
+    wait: bool | None = None,
+    timeout_seconds: Annotated[int, Query(ge=1, le=60)] = 30,
+) -> SourceDocument | OperationAccepted:
     document = session.get(SourceDocument, document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
-    service = DocumentService(session, artifact_store, max_upload_bytes=settings.max_upload_bytes)
     parse_snapshot = dict(document.corpus_version.parser_configuration)
     snapshot_hash = hashlib.sha256(canonical_json(parse_snapshot)).hexdigest()
     job, created = create_job(
@@ -271,26 +277,20 @@ def parse_document(
     )
     if not created and job.status.value == "succeeded" and document.parse_status.value == "ready":
         return document
-    start_job(job)
-    try:
-        service.parse(document)
-        artifact_ids = [
-            str(value)
-            for value in session.scalars(
-                select(Artifact.id).where(
-                    Artifact.document_id == document.id,
-                    Artifact.artifact_type == "normalized-document",
-                )
-            )
-        ]
-        complete_job(job, result_artifact_ids=artifact_ids)
-        session.commit()
-    except DocumentParseError as exc:
-        fail_job(job, error_code=exc.code, error_message=exc.message)
-        # Failure is part of inspectable document state, so persist it before the
-        # global stable-error handler returns the failure response.
-        session.commit()
-        raise
+    session.commit()
+    if not (settings.job_api_default_wait if wait is None else wait):
+        response.status_code = 202
+        return receipt(job, resource_type="document", resource_id=document.id)
+    completed = run_inline_for_bounded_wait(
+        session,
+        job,
+        settings=settings,
+        artifact_store=artifact_store,
+        timeout_seconds=timeout_seconds,
+    )
+    if not completed:
+        response.status_code = 202
+        return receipt(job, resource_type="document", resource_id=document.id)
     session.refresh(document)
     return document
 
@@ -335,12 +335,20 @@ def get_artifact_content(
     return StreamingResponse(body(), media_type=artifact.media_type, headers=headers)
 
 
-@router.post("/corpus-versions/{version_id}/chunk", response_model=list[ChunkRead])
+@router.post(
+    "/corpus-versions/{version_id}/chunk",
+    response_model=list[ChunkRead] | OperationAccepted,
+)
 def generate_chunks(
     version_id: UUID,
     request: ChunkRequest,
+    response: Response,
     session: Annotated[Session, Depends(get_db)],
-) -> list[Chunk]:
+    settings: Annotated[Settings, Depends(get_settings)],
+    artifact_store: Annotated[LocalArtifactStore, Depends(get_artifact_store)],
+    wait: bool | None = None,
+    timeout_seconds: Annotated[int, Query(ge=1, le=60)] = 30,
+) -> list[Chunk] | OperationAccepted:
     version = session.get(CorpusVersion, version_id)
     if version is None:
         raise HTTPException(status_code=404, detail="Corpus version not found")
@@ -372,7 +380,11 @@ def generate_chunks(
     job, created = create_job(
         session,
         job_type="chunk_generation",
-        input_reference={"corpus_version_id": str(version.id), **version_snapshot},
+        input_reference={
+            "corpus_version_id": str(version.id),
+            "strategy": request.strategy,
+            **version_snapshot,
+        },
         idempotency_key=f"chunk:{version.id}:{snapshot_hash}",
         progress_total=version.document_count,
     )
@@ -390,20 +402,30 @@ def generate_chunks(
         )
         session.commit()
         return existing_chunks
-    start_job(job)
-    try:
-        chunks = ChunkService(session).generate_for_version(version, chunker)
-        complete_job(job)
-    except Exception as exc:
-        fail_job(
-            job,
-            error_code=getattr(exc, "code", "CHUNKING_FAILED"),
-            error_message=str(exc),
-        )
-        session.commit()
-        raise
-    version.chunker_configuration = version_snapshot
     session.commit()
+    if not (settings.job_api_default_wait if wait is None else wait):
+        response.status_code = 202
+        return receipt(job, resource_type="corpus_version", resource_id=version.id)
+    completed = run_inline_for_bounded_wait(
+        session,
+        job,
+        settings=settings,
+        artifact_store=artifact_store,
+        timeout_seconds=timeout_seconds,
+    )
+    if not completed:
+        response.status_code = 202
+        return receipt(job, resource_type="corpus_version", resource_id=version.id)
+    chunks = list(
+        session.scalars(
+            select(Chunk)
+            .where(
+                Chunk.corpus_version_id == version.id,
+                Chunk.chunker_id == chunker.chunker_id,
+            )
+            .order_by(Chunk.document_id, Chunk.sequence_number)
+        )
+    )
     for chunk in chunks:
         session.refresh(chunk)
     return chunks
@@ -432,3 +454,14 @@ def get_chunks(
             .limit(limit)
         ).all()
     )
+
+
+@router.get("/chunks/{chunk_id}", response_model=ChunkRead)
+def get_chunk(
+    chunk_id: UUID,
+    session: Annotated[Session, Depends(get_db)],
+) -> Chunk:
+    chunk = session.get(Chunk, chunk_id)
+    if chunk is None:
+        raise HTTPException(status_code=404, detail="Chunk not found")
+    return chunk

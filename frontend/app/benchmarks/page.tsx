@@ -24,8 +24,8 @@ export default function BenchmarksPage() {
   useEffect(() => { void load(); }, [load]);
 
   async function createBenchmark(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); const data = new FormData(event.currentTarget); setBusy("benchmark"); setError("");
-    try { await api.createBenchmark({ name: String(data.get("name")), description: String(data.get("description") || "") }); event.currentTarget.reset(); await load(); }
+    event.preventDefault(); const form = event.currentTarget; const data = new FormData(form); setBusy("benchmark"); setError("");
+    try { await api.createBenchmark({ name: String(data.get("name")), description: String(data.get("description") || "") }); form.reset(); await load(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Benchmark could not be created"); }
     finally { setBusy(""); }
   }

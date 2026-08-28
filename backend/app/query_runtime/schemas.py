@@ -62,6 +62,8 @@ class QueryRunRead(BaseModel):
     generation_metadata: dict[str, Any]
     context_artifact_id: UUID | None
     raw_response_artifact_id: UUID | None
+    experiment_run_id: UUID | None
+    experiment_attempt_number: int | None
 
 
 class RetrievalResultRead(BaseModel):

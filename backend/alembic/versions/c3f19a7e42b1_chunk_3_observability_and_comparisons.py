@@ -106,9 +106,21 @@ def upgrade() -> None:
         ),
         sa.ForeignKeyConstraint(["query_run_id"], ["query_runs.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("comparison_id", "column_position"),
-        sa.UniqueConstraint("comparison_id", "pipeline_configuration_id"),
-        sa.UniqueConstraint("comparison_id", "query_run_id"),
+        sa.UniqueConstraint(
+            "comparison_id",
+            "column_position",
+            name="uq_query_comparison_runs_comparison_position",
+        ),
+        sa.UniqueConstraint(
+            "comparison_id",
+            "pipeline_configuration_id",
+            name="uq_query_comparison_runs_comparison_pipeline",
+        ),
+        sa.UniqueConstraint(
+            "comparison_id",
+            "query_run_id",
+            name="uq_query_comparison_runs_comparison_run",
+        ),
     )
     op.create_index(
         "ix_query_comparison_runs_comparison_id",

@@ -7,6 +7,9 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.app.api.routes.documents import get_artifact_store
+from backend.app.artifacts.service import LocalArtifactStore
+from backend.app.core.config import Settings, get_settings
 from backend.app.core.errors import DomainError
 from backend.app.db.models import (
     Chunk,
@@ -44,10 +47,14 @@ def _run_or_404(session: Session, run_id: UUID) -> QueryRun:
 def create_query_run(
     payload: QueryRunCreate,
     session: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    artifact_store: Annotated[LocalArtifactStore, Depends(get_artifact_store)],
 ) -> QueryRun:
     # Stage failures are persisted research records. Returning the failed run ID lets
     # the Query Laboratory inspect its partial observable trace.
-    return QueryOrchestrator(session).execute(payload, raise_on_failure=False)
+    return QueryOrchestrator(
+        session, settings=settings, artifact_store=artifact_store
+    ).execute(payload, raise_on_failure=False)
 
 
 @router.get("/query-runs/{run_id}", response_model=QueryRunRead)

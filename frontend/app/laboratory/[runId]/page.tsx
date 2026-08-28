@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { StatusBadge } from "@/components/StatusBadge";
 import { api } from "@/lib/api";
-import type { EvaluationBundle, FailureAttribution, ObservableTraceExport, QueryRun, RunClaim, RunContextSource, RunRetrievalResult, TraceSpan } from "@/lib/types";
+import type { EvaluationBundle, FailureAttribution, HumanReviewQueueItem, ObservableTraceExport, QueryRun, RunClaim, RunContextSource, RunRetrievalResult, TraceSpan } from "@/lib/types";
 
 type RankedChunk = {
   chunkId: string;
@@ -121,6 +121,71 @@ function FailureReview({ runId, attribution, onSaved }: { runId: string; attribu
   return <details><summary>Human review</summary><div className="query-grid"><label>Corrected taxonomy label<select value={label} onChange={(event) => setLabel(event.target.value)}>{failureLabels.map((value) => <option key={value}>{value}</option>)}</select></label><label>Reviewer note<textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} /></label></div><button className="secondary" disabled={saving || !note.trim()} onClick={() => void save()}>{saving ? "Saving…" : "Preserve human correction"}</button></details>;
 }
 
+const humanMetricFields = [
+  ["answer_correctness", "Answer correctness"],
+  ["answer_completeness", "Answer completeness"],
+  ["appropriate_abstention", "Appropriate abstention"],
+  ["false_premise_recognition", "False-premise recognition"],
+  ["claim_support_rate", "Claim support rate"],
+  ["citation_precision", "Citation precision"],
+] as const;
+
+type HumanMetricName = typeof humanMetricFields[number][0];
+
+function HumanMetricReview({ runId, evaluation, onSaved }: { runId: string; evaluation: EvaluationBundle | null; onSaved: () => Promise<void> }) {
+  const current = useMemo(() => {
+    const values = new Map<HumanMetricName, string>();
+    const humanRows = [...(evaluation?.metrics ?? [])]
+      .filter((metric) => metric.evaluation_method === "human")
+      .sort((left, right) => right.created_at.localeCompare(left.created_at));
+    for (const metric of humanRows) {
+      if (humanMetricFields.some(([name]) => name === metric.metric_name) && !values.has(metric.metric_name as HumanMetricName)) {
+        values.set(metric.metric_name as HumanMetricName, metric.metric_value == null ? "" : String(metric.metric_value));
+      }
+    }
+    return Object.fromEntries(humanMetricFields.map(([name]) => [name, values.get(name) ?? ""])) as Record<HumanMetricName, string>;
+  }, [evaluation]);
+  const [values, setValues] = useState<Record<HumanMetricName, string>>(current);
+  const [reviewer, setReviewer] = useState("human-reviewer");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => { setValues(current); }, [current]);
+
+  async function save() {
+    const populated = humanMetricFields.filter(([name]) => values[name] !== "");
+    if (!reviewer.trim() || populated.length === 0) return;
+    setSaving(true); setMessage("");
+    try {
+      for (const [name] of populated) {
+        await api.addHumanEvaluation(runId, {
+          metric_name: name,
+          metric_value: Number(values[name]),
+          reviewer_label: reviewer.trim(),
+          reviewer_note: note.trim() || undefined,
+        });
+      }
+      await api.evaluateRun(runId);
+      await onSaved();
+      setMessage(`${populated.length} human labels preserved separately from automatic judgments.`);
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : "Human labels could not be saved");
+    } finally { setSaving(false); }
+  }
+
+  return <div className="exact-context">
+    <div><h3>Human evaluation review</h3><p className="muted">Enter reviewed scores from 0 to 1. Saving creates versioned human metrics; automatic judgments remain unchanged.</p></div>
+    <div className="query-grid">
+      {humanMetricFields.map(([name, label]) => <label key={name}>{label}<input aria-label={label} type="number" min="0" max="1" step="0.01" value={values[name]} onChange={(event) => setValues((stored) => ({ ...stored, [name]: event.target.value }))} /></label>)}
+      <label>Reviewer label<input value={reviewer} maxLength={255} onChange={(event) => setReviewer(event.target.value)} /></label>
+      <label>Reviewer note<textarea aria-label="Human evaluation reviewer note" value={note} maxLength={20000} rows={3} onChange={(event) => setNote(event.target.value)} /></label>
+    </div>
+    <button className="secondary" disabled={saving || !reviewer.trim() || humanMetricFields.every(([name]) => values[name] === "")} onClick={() => void save()}>{saving ? "Preserving labels…" : "Preserve human labels"}</button>
+    {message && <p aria-live="polite">{message}</p>}
+  </div>;
+}
+
 export default function LaboratoryRunPage() {
   const { runId } = useParams<{ runId: string }>();
   const [run, setRun] = useState<QueryRun | null>(null);
@@ -132,6 +197,7 @@ export default function LaboratoryRunPage() {
   const [evaluating, setEvaluating] = useState(false);
   const [exactContext, setExactContext] = useState<string | null>(null);
   const [loadingContext, setLoadingContext] = useState(false);
+  const [reviewNavigation, setReviewNavigation] = useState<{ experimentId: string; position: number; total: number; previous: HumanReviewQueueItem | null; next: HumanReviewQueueItem | null } | null>(null);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
@@ -147,6 +213,24 @@ export default function LaboratoryRunPage() {
   }, [runId]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const parameters = new URLSearchParams(window.location.search);
+    const experimentId = parameters.get("experiment");
+    const position = Number(parameters.get("position") ?? "0");
+    const total = Number(parameters.get("total") ?? "0");
+    if (!experimentId || !Number.isInteger(position) || position < 1) return;
+    const offset = Math.max(position - 2, 0);
+    void api.getHumanReviewQueue(experimentId, offset, 3).then((page) => {
+      const index = page.items.findIndex((item) => item.query_run_id === runId);
+      setReviewNavigation({
+        experimentId,
+        position,
+        total: total || page.remaining,
+        previous: index > 0 ? page.items[index - 1] : null,
+        next: index >= 0 && index + 1 < page.items.length ? page.items[index + 1] : null,
+      });
+    }).catch(() => setReviewNavigation({ experimentId, position, total, previous: null, next: null }));
+  }, [runId]);
   const ranked = useMemo(() => mergeRankedRows(retrieval), [retrieval]);
   const selected = context.filter((source) => source.selected);
   const excluded = context.filter((source) => !source.selected);
@@ -181,6 +265,7 @@ export default function LaboratoryRunPage() {
     <header className="topbar"><a className="brand" href="/"><span className="brand-mark">R</span><div><strong>RAGScope</strong><small>Query Laboratory</small></div></a><nav className="top-nav"><a href="/laboratory">New query</a><StatusBadge status={run.status} /></nav></header>
     <main id="main" className="shell laboratory-shell">
       <a className="back" href="/laboratory">← New laboratory query</a>
+      {reviewNavigation && <nav className="lab-section-nav" aria-label="Human review navigation"><a href={`/experiments/${reviewNavigation.experimentId}/review`}>← Review queue</a><span>Review {reviewNavigation.position} of {reviewNavigation.total}</span>{reviewNavigation.previous ? <a href={`/laboratory/${reviewNavigation.previous.query_run_id}?review=1&experiment=${reviewNavigation.experimentId}&position=${reviewNavigation.position - 1}&total=${reviewNavigation.total}`}>← Previous run</a> : <span>First queued run</span>}{reviewNavigation.next ? <a href={`/laboratory/${reviewNavigation.next.query_run_id}?review=1&experiment=${reviewNavigation.experimentId}&position=${reviewNavigation.position + 1}&total=${reviewNavigation.total}`}>Next run →</a> : <span>Last loaded run</span>}</nav>}
       <section className="lab-run-header"><div><p className="eyebrow">Observable execution trace</p><h1>{run.query_text}</h1><p>Run <code>{run.id}</code> · schema <code>{trace.schema_version}</code></p></div>{run.failure_code && <div className="failure-callout" role="alert"><strong>Pipeline failed</strong><span>{run.failure_code}</span><p>{run.failure_message ?? "Successful earlier stages remain available below."}</p></div>}</section>
       {error && <div role="alert" className="alert">{error}</div>}
       <nav className="lab-section-nav" aria-label="Trace sections"><a href="#query">Query</a><a href="#timeline">Timeline</a><a href="#retrieval">Retrieval</a><a href="#context">Context</a><a href="#generation">Generation</a><a href="#evaluation">Evaluation</a><a href="#failures">Failures</a><a href="#claims">Claims & citations</a></nav>
@@ -213,6 +298,7 @@ export default function LaboratoryRunPage() {
       <section id="evaluation" className="panel lab-section"><div className="section-heading"><div><p className="eyebrow">Scientific measurement</p><h2>Per-run evaluation</h2></div><button className="secondary" disabled={evaluating} onClick={() => void evaluate()}>{evaluating ? "Evaluating…" : evaluation?.metrics.length ? "Recompute versioned metrics" : "Evaluate run"}</button></div>
         {run.benchmark_question_id ? <p>Human benchmark ground truth linked: <code>{run.benchmark_question_id}</code>. Alternative evidence sets are scored as alternatives.</p> : <p className="muted">No benchmark question is linked. Human-grounded metrics remain missing rather than being recorded as zero.</p>}
         {evaluation && evaluation.metrics.length > 0 ? <div className="lab-table-wrap"><table className="lab-table"><caption>Versioned metrics; Missing means the required label or input was unavailable</caption><thead><tr><th>Metric</th><th>Scope</th><th>Value</th><th>Method</th><th>Version / inputs</th></tr></thead><tbody>{evaluation.metrics.map((metric) => <tr key={metric.id}><td><strong>{metric.metric_name.replaceAll("_", " ")}</strong></td><td>{metric.metric_scope}</td><td>{metric.metric_value == null ? "Missing" : metric.metric_value.toFixed(4)}</td><td><StatusBadge status={metric.evaluation_method} /></td><td><code>{metric.metric_version}</code><details><summary>Inspectable inputs and details</summary><pre>{JSON.stringify({ details: metric.details, input_snapshot: metric.input_snapshot, input_hash: metric.input_hash }, null, 2)}</pre></details></td></tr>)}</tbody></table></div> : <p className="muted">No evaluation has been calculated for this run.</p>}
+        {run.benchmark_question_id && <HumanMetricReview runId={runId} evaluation={evaluation} onSaved={load} />}
       </section>
 
       <section id="failures" className="panel lab-section"><div className="section-heading"><div><p className="eyebrow">Failure attribution</p><h2>Earliest observable responsible stage</h2></div><span className="muted">Automatic labels and human corrections coexist</span></div>{evaluation?.failure_attributions.length ? <div className="claim-grid">{evaluation.failure_attributions.map((attribution) => <article className="lab-claim" key={attribution.id}><div className="claim-heading"><strong>{attribution.is_primary ? "Primary" : "Secondary"} · {attribution.pipeline_stage}</strong><StatusBadge status={attribution.human_override_label ? "human reviewed" : "automatic"} /></div><p><strong>{attribution.human_override_label ?? attribution.automatic_label}</strong></p>{attribution.human_override_label && <small>Automatic label preserved: {attribution.automatic_label}</small>}<p>{attribution.attribution_rule.replaceAll("_", " ")}</p><details><summary>Attribution evidence</summary><pre>{JSON.stringify(attribution.evidence, null, 2)}</pre></details><FailureReview runId={runId} attribution={attribution} onSaved={load} /></article>)}</div> : <p className="muted">No observable quality or infrastructure failure has been attributed.</p>}</section>

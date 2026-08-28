@@ -1,44 +1,88 @@
 # RAGScope
 
-RAGScope is a research platform for observable and reproducible Retrieval-Augmented Generation over scientific documents. Chunks 1–2 implement the scientific knowledge-base lifecycle and a complete, fixed single-query RAG runtime.
+RAGScope is an observable research platform for studying Retrieval-Augmented
+Generation over scientific documents. It preserves the path from an original
+question through retrieval, reranking, context selection, structured generation,
+claims, citations, evaluation, failure attribution, and controlled experiments.
 
-The runtime supports no retrieval, lexical, dense, hybrid RRF, and hybrid plus reranking. Adaptive routing, full trace UI, benchmarks, evaluation, experiments, and results dashboards remain out of scope until later chunks.
+## Problem and research contribution
 
-## Chunk 2 runtime
+RAG systems often expose a final answer without enough evidence to determine
+whether a failure came from parsing, retrieval, reranking, context budgeting,
+generation, citation handling, or infrastructure. RAGScope makes those observable
+boundaries persistent and inspectable. Its contribution is an evidence-centric
+instrument—not a claim that one retrieval strategy is universally best.
 
-- Versioned, freeze-only pipeline configurations and a frozen `grounded-answer` prompt snapshot.
-- One application orchestrator for normalization/classification, optional rewrite, retrieval, fusion, optional reranking, context selection, grounded structured generation, and persistence.
-- Inspectable lexical/dense/fused/reranked ranks that are never overwritten.
-- Whole-chunk token budgeting, deterministic deduplication, stable `S1` source IDs, and byte-exact persisted generator context.
-- Typed answerable/partial/unanswerable output, raw-response artifacts, claim/citation existence validation, usage and nullable cost records.
-- Deterministic offline generation/reranking plus opt-in native Gemini and OpenAI-compatible generation.
-- API and `/runtime` UI for pipeline configuration, single-query execution, claims, citations, and basic source inspection.
+The platform provides:
 
-## Chunk 1 architecture
+- immutable corpus, prompt, pipeline, router, benchmark, and experiment snapshots;
+- no-retrieval, lexical, dense, hybrid RRF, hybrid-reranked, and adaptive routes;
+- rank history that is never overwritten between retrieval stages;
+- exact content-hashed generator context and raw-provider-response artifacts;
+- human-reviewed dataset extraction and benchmark evidence annotations;
+- versioned retrieval, context, answerability, citation, operational, and failure metrics;
+- resumable question × pipeline × repetition experiments; and
+- denominator-aware analysis with run-level CSV and versioned JSON exports.
 
-- `backend/app/corpora`: corpus/version state machine and canonical content hashes.
-- `backend/app/artifacts`: content-hashed, random-keyed atomic local artifact storage outside executable source.
-- `backend/app/documents`: validation, parser protocol, Docling adapter, text/Markdown normalization, warnings, and chunkers.
-- `backend/app/indexing`: version-isolated PostgreSQL FTS/pgvector indexes with portable SQLite fixture implementations.
-- `backend/app/providers`: provider-independent embedding/generation/reranker protocols and deterministic fakes.
-- `backend/app/jobs`: durable local job state and idempotency contracts.
-- `frontend`: accessible Next.js corpus, document, provenance, chunk, and index inspection screens.
+## Architecture at a glance
 
-Multiple chunker outputs may coexist for comparison. Exactly one chunker snapshot is active on a corpus version; only its chunks enter that version's lexical and dense indexes.
+```text
+Scientific files -> parse -> elements -> chunks -> lexical/dense indexes
+                                                |
+Question -> classify/rewrite -> fixed/adaptive route -> retrieve/fuse/rerank
+                                                |
+                      exact context -> generation -> claims/citations
+                                                |
+                observable trace -> evaluation -> failure attribution
+                                                |
+       frozen benchmark + pipelines -> experiment matrix -> analysis/export
+```
+
+The FastAPI application owns domain services and persistence. PostgreSQL/pgvector
+is the production-oriented database path; deterministic SQLite implementations
+support ordinary engineering tests. Large exact payloads live in the content-hashed
+artifact store. The Next.js interface provides the Corpus Studio, Document
+Inspector, Pipeline Builder, Query Laboratory, Pipeline Comparison, Dataset
+Catalog, Benchmark Editor, Experiment Manager, and Results Dashboard.
+
+See [Architecture](docs/ARCHITECTURE.md) for component, trace, versioning, error,
+and security boundaries.
+
+## Supported pipelines
+
+| Condition | Retrieval | Optional rewrite | Optional rerank | Intended role |
+| --- | --- | --- | --- | --- |
+| No RAG | None | Yes | No | Generation baseline without corpus evidence |
+| Lexical | PostgreSQL FTS or deterministic fixture TF-IDF | Yes | Yes | Exact-term baseline |
+| Dense | pgvector cosine or deterministic fake embeddings | Yes | Yes | Embedding baseline |
+| Hybrid | Lexical + dense with configurable RRF | Yes | Yes | Fused evidence baseline |
+| Adaptive | Deterministic versioned router selects allowed settings | Router decision | Router decision | Cost/quality routing analysis |
+
+PostgreSQL lexical ranking uses `ts_rank_cd`; RAGScope does not mislabel it as
+BM25. The fake embedding and judge implementations are deterministic test tools,
+not research-quality semantic models.
 
 ## Quick start with Docker
 
 Requirements: Docker Desktop with Compose.
 
-1. Copy `.env.example` to `.env`. The example contains local-only placeholders, not secrets.
-2. Run `docker compose up --build`.
-3. Open `http://localhost:3000`; the API documentation is at `http://localhost:8000/docs`.
+```powershell
+Copy-Item .env.example .env
+docker compose up --build
+```
 
-The API container installs the optional Docling dependency so PDFs use layout-aware parsing. PostgreSQL 16 is supplied with pgvector. Uploaded artifacts live in a Docker volume and are excluded from Git.
+Open:
+
+- application: `http://localhost:3000`
+- API documentation: `http://localhost:8000/docs`
+- health check: `http://localhost:8000/health`
+
+Docker uses PostgreSQL 16 with pgvector and persists database/artifact volumes.
+The checked-in defaults use fake providers and require no external API key.
 
 ## Local development
 
-Backend (Python 3.12+):
+Requirements: Python 3.12+, Node.js 22+, and PowerShell for these examples.
 
 ```powershell
 python -m venv .venv
@@ -50,7 +94,7 @@ $env:RAGSCOPE_ARTIFACT_ROOT = "./var/artifacts"
 .\.venv\Scripts\uvicorn.exe backend.app.main:app --reload
 ```
 
-Frontend (Node 22+):
+In a second terminal:
 
 ```powershell
 Set-Location frontend
@@ -58,49 +102,102 @@ npm install
 npm run dev
 ```
 
-For PostgreSQL development, keep the database URL from `.env.example` and start the `db` Compose service. Never commit `.env`.
+Never commit `.env`. For optional Gemini calls, place
+`RAGSCOPE_GEMINI_API_KEY` only in the root `.env`; never paste it into chat,
+source, frozen snapshots, prompts, or frontend payloads. The default Gemini
+model is `gemini-2.5-flash`.
 
-## Fixture workflow
+## Reproducible fixture experiment
 
-1. Create a corpus and draft version.
-2. Upload PDF, Markdown, or UTF-8 text. Duplicate bytes in the same version are rejected.
-3. Open a document, parse it, inspect warnings/elements/page provenance, and preview its original PDF.
-4. Generate fixed-token and/or structure-aware chunks. The most recently generated strategy becomes the active index snapshot while both remain inspectable.
-5. Build indexes. The persisted job reports lexical and dense progress/failures.
-6. Verify status/counts, perform fixture search through the lexical/dense API, and freeze the ready version.
-7. Confirm any post-freeze upload, parse, metadata, chunk, or state mutation returns `CORPUS_VERSION_IMMUTABLE`.
+The complete setup, UI sequence, API checks, export checks, and clean verification
+commands are in [Reproducibility](docs/REPRODUCIBILITY.md). The short path is:
 
-## Scoring and providers
+1. Ingest and parse a small local document set.
+2. Generate chunks, build lexical/dense indexes, and freeze the ready corpus version.
+3. Create and freeze at least two pipeline configurations.
+4. Author a small reviewed benchmark with stable source evidence and freeze it.
+5. Create an experiment, calculate the cost ceiling, freeze it, and start the matrix.
+6. Resume interrupted/retryable cells; completed valid QueryRuns are not duplicated.
+7. Inspect contributing runs in Query Laboratory and export tidy CSV/versioned JSON.
 
-- PostgreSQL lexical search uses `ts_rank_cd`; it is not called BM25.
-- SQLite tests use a documented TF-IDF cosine fallback.
-- Dense PostgreSQL search uses pgvector cosine distance; SQLite fixture tests use the same cosine definition in process.
-- Ordinary tests use the deterministic fake embedding provider and need no API key.
+Representative local papers belong in the Git-ignored directory
+`benchmark/fixtures/representative/`. Their presence on disk does **not** mean
+they have been ingested, reviewed, or included in a frozen research corpus.
 
-Exact details are in [docs/INDEXING.md](docs/INDEXING.md).
+For a complete no-network engineering proof on PostgreSQL, run:
 
-## Gemini generation
+```powershell
+$env:RAGSCOPE_DATABASE_URL = "postgresql+psycopg://ragscope:ragscope@localhost:5433/ragscope"
+$env:RAGSCOPE_ARTIFACT_ROOT = (Resolve-Path ".\var\artifacts").Path
+.\.venv\Scripts\alembic.exe upgrade head
+.\.venv\Scripts\python.exe -m backend.app.fixture_workflow
+```
 
-Set `RAGSCOPE_GEMINI_API_KEY` only in the root `.env`, then create a pipeline with
-`generation_configuration.provider` set to `gemini`. The runtime UI exposes this as
-**Google Gemini** and preselects the stable `gemini-2.5-flash` model. The adapter uses
-Gemini's native `generateContent` structured-output contract; fake and OpenAI-compatible
-providers remain available and unchanged.
+The idempotent loader creates a synthetic two-document corpus, fixed and
+structure-aware chunks, fake lexical/dense indexes, frozen P0–P5 configurations,
+a five-question reviewed benchmark, a 30-cell experiment, immutable exports, and
+all eight figure artifacts. Repeating the command reuses the same identities.
+These are engineering fixtures, not scientific findings.
+
+Long operations return a `202` job receipt by default and are executed by the
+PostgreSQL-backed worker. Use `GET /api/v1/jobs/{id}` to poll. `wait=true` is
+bounded by `timeout_seconds` (1–60); it never turns a production request into an
+unbounded inline task.
 
 ## Engineering checks
 
+From the repository root:
+
 ```powershell
-.\.venv\Scripts\pytest.exe backend/tests -q -p no:cacheprovider
-.\.venv\Scripts\ruff.exe check backend
-.\.venv\Scripts\mypy.exe backend/app
+.\.venv\Scripts\python.exe -m pytest backend/tests -q -p no:cacheprovider
+.\.venv\Scripts\python.exe -m ruff check backend
+.\.venv\Scripts\python.exe -m mypy
+.\.venv\Scripts\alembic.exe upgrade head
 Set-Location frontend
 npm run typecheck
 npm run lint
 npm run build
+npm run e2e
 ```
 
-## Security and limitations
+Ordinary automated tests use deterministic fake providers and do not require
+network access or a paid API.
 
-Uploads are size-, extension-, signature/MIME-, binary-, and UTF-8-validated. Client filenames are display metadata only; storage keys are random references and every artifact retains a SHA-256 hash. Keys are checked beneath a dedicated root. Artifact APIs accept UUIDs and never arbitrary filesystem paths.
+## Results and demonstration status
 
-The optional Docling adapter fails explicitly if unavailable instead of silently degrading to plain PDF text. Real scientific PDF/OCR behavior, live PostgreSQL migrations/ranking, large-corpus performance, and browser-level UI QA still require the focused checks recorded in [docs/GEMINI_QA.md](docs/GEMINI_QA.md).
+> **Main-results placeholder:** no main frozen 50–100-question benchmark or main
+> research experiment is claimed by this repository documentation. Do not insert
+> pipeline rankings, effect sizes, costs, or conclusions here until they are backed
+> by a completed frozen experiment and its exported run/aggregate tables.
+
+> **Demo-media placeholder:** no demonstration screenshots or video are claimed as
+> checked-in assets. Follow [Demo workflow](docs/DEMO_WORKFLOW.md) to record them
+> from an actual local run. Do not substitute mock values for missing experiment data.
+
+The report-input mapping and explicit result placeholders are in
+[Report inputs](docs/REPORT_INPUTS.md). A fillable report structure is in
+[Research report](docs/RESEARCH_REPORT.md). Reproducible report figures are
+generated from a versioned analysis JSON export with
+`scripts/research/generate_figures.py`; missing inputs produce labelled
+placeholders rather than fabricated points.
+
+## Safety and limitations
+
+- Uploaded documents are untrusted data and cannot trigger browsing, tools, code
+  execution, or external actions.
+- API keys come only from environment/local secret files and are redacted from
+  traces, provider errors, artifacts, and exports.
+- Artifact endpoints resolve UUID-backed records beneath a configured root; they
+  do not accept arbitrary file paths.
+- Human benchmark labels remain separate from model suggestions and automated judges.
+- Missing labels and unknown prices remain null/missing, never invented zeroes.
+- LLM-judge metrics are secondary; primary conclusions must use human evidence and labels.
+- Small corpora, author-created questions, parser errors, model drift, and single-run
+  generation can limit validity.
+- Real PDF/OCR behavior, live-provider behavior, browser flows, and large-corpus
+  performance require focused verification in the target environment.
+
+Read [Methodology](docs/METHODOLOGY.md),
+[Threats to validity](docs/THREATS_TO_VALIDITY.md), and the maintained manual QA
+checklist in [docs/GEMINI_QA.md](docs/GEMINI_QA.md) before reporting findings.
+The complete documentation map is in [docs/README.md](docs/README.md).

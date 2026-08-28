@@ -1,6 +1,6 @@
 from __future__ import annotations
-import typing
 
+import typing
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID, uuid4

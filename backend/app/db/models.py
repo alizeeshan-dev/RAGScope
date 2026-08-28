@@ -50,6 +50,14 @@ class JobStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class JobAttemptStatus(StrEnum):
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    INTERRUPTED = "interrupted"
+    CANCELLED = "cancelled"
+
+
 class IndexStatus(StrEnum):
     PENDING = "pending"
     BUILDING = "building"
@@ -164,6 +172,32 @@ class EvaluationMetricScope(StrEnum):
 class PipelineExecutionMode(StrEnum):
     FIXED = "fixed"
     ADAPTIVE = "adaptive"
+
+
+class ExperimentStatus(StrEnum):
+    DRAFT = "draft"
+    FROZEN = "frozen"
+    RUNNING = "running"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    COMPLETED_WITH_FAILURES = "completed_with_failures"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class ExperimentCellStatus(StrEnum):
+    PLANNED = "planned"
+    RUNNING = "running"
+    RETRYABLE = "retryable"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class ExperimentAttemptStatus(StrEnum):
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    INTERRUPTED = "interrupted"
 
 
 def enum_type(enum: type[StrEnum], name: str) -> SAEnum:
@@ -339,6 +373,9 @@ class Artifact(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         ),
         index=True,
     )
+    experiment_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("experiments.id", ondelete="RESTRICT", use_alter=True), index=True
+    )
     trace_span_id: Mapped[UUID | None] = mapped_column(
         ForeignKey(
             "trace_spans.id",
@@ -365,6 +402,7 @@ class Job(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint("progress_current >= 0", name="progress_current_nonnegative"),
         CheckConstraint("progress_total >= 0", name="progress_total_nonnegative"),
         CheckConstraint("retry_count >= 0", name="retry_count_nonnegative"),
+        CheckConstraint("max_attempts >= 1", name="job_max_attempts_positive"),
     )
 
     job_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
@@ -381,6 +419,43 @@ class Job(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     error_message: Mapped[str | None] = mapped_column(Text)
     result_artifact_ids: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     idempotency_key: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)
+    available_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    lease_owner: Mapped[str | None] = mapped_column(String(255), index=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancellation_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+
+    attempts: Mapped[list[JobAttempt]] = relationship(
+        back_populates="job", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class JobAttempt(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    __tablename__ = "job_attempts"
+    __table_args__ = (
+        UniqueConstraint("job_id", "attempt_number"),
+        CheckConstraint("attempt_number >= 1", name="job_attempt_number_positive"),
+    )
+
+    job_id: Mapped[UUID] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    worker_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    status: Mapped[JobAttemptStatus] = mapped_column(
+        enum_type(JobAttemptStatus, "job_attempt_status"), nullable=False, index=True
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error_code: Mapped[str | None] = mapped_column(String(100))
+    error_message: Mapped[str | None] = mapped_column(Text)
+
+    job: Mapped[Job] = relationship(back_populates="attempts")
 
 
 class SearchIndex(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -538,6 +613,17 @@ class PromptTemplate(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
 
 class QueryRun(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "query_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "experiment_run_id",
+            "experiment_attempt_number",
+            name="uq_query_run_experiment_attempt",
+        ),
+        CheckConstraint(
+            "experiment_attempt_number IS NULL OR experiment_attempt_number >= 1",
+            name="query_run_experiment_attempt_positive",
+        ),
+    )
 
     corpus_version_id: Mapped[UUID] = mapped_column(
         ForeignKey("corpus_versions.id", ondelete="RESTRICT"), nullable=False, index=True
@@ -586,6 +672,11 @@ class QueryRun(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     raw_response_artifact_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("artifacts.id", ondelete="RESTRICT"), index=True
     )
+    experiment_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("experiment_runs.id", ondelete="RESTRICT", use_alter=True),
+        index=True,
+    )
+    experiment_attempt_number: Mapped[int | None] = mapped_column(Integer)
 
     pipeline_configuration: Mapped[PipelineConfiguration] = relationship(
         back_populates="query_runs"
@@ -608,6 +699,9 @@ class QueryRun(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     )
     comparison_links: Mapped[list[QueryComparisonRun]] = relationship(
         back_populates="query_run", cascade="all, delete-orphan", passive_deletes=True
+    )
+    experiment_run: Mapped[ExperimentRun | None] = relationship(
+        back_populates="query_runs", foreign_keys=[experiment_run_id]
     )
 
 
@@ -670,9 +764,21 @@ class QueryComparison(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
 class QueryComparisonRun(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "query_comparison_runs"
     __table_args__ = (
-        UniqueConstraint("comparison_id", "pipeline_configuration_id"),
-        UniqueConstraint("comparison_id", "column_position"),
-        UniqueConstraint("comparison_id", "query_run_id"),
+        UniqueConstraint(
+            "comparison_id",
+            "pipeline_configuration_id",
+            name="uq_query_comparison_runs_comparison_pipeline",
+        ),
+        UniqueConstraint(
+            "comparison_id",
+            "column_position",
+            name="uq_query_comparison_runs_comparison_position",
+        ),
+        UniqueConstraint(
+            "comparison_id",
+            "query_run_id",
+            name="uq_query_comparison_runs_comparison_run",
+        ),
     )
 
     comparison_id: Mapped[UUID] = mapped_column(
@@ -1072,6 +1178,141 @@ class Citation(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     entailment_score: Mapped[float | None] = mapped_column(Float)
 
     claim: Mapped[GeneratedClaim] = relationship(back_populates="citations")
+
+
+class Experiment(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """A reproducible, immutable-after-freeze research configuration."""
+
+    __tablename__ = "experiments"
+    __table_args__ = (
+        CheckConstraint("repetitions >= 1", name="experiment_repetitions_positive"),
+    )
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    research_question: Mapped[str] = mapped_column(Text, nullable=False)
+    corpus_version_id: Mapped[UUID] = mapped_column(
+        ForeignKey("corpus_versions.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    benchmark_version_id: Mapped[UUID] = mapped_column(
+        ForeignKey("benchmark_versions.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    pipeline_configuration_ids: Mapped[list[str]] = mapped_column(
+        JSON, default=list, nullable=False
+    )
+    repetitions: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    status: Mapped[ExperimentStatus] = mapped_column(
+        enum_type(ExperimentStatus, "experiment_status"),
+        default=ExperimentStatus.DRAFT,
+        nullable=False,
+        index=True,
+    )
+    code_commit: Mapped[str] = mapped_column(String(100), nullable=False)
+    stop_on_error: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    retry_policy: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    dependency_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    analysis_configuration: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    configuration_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    cost_estimate: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    estimated_cost: Mapped[float | None] = mapped_column(Float)
+    estimated_cost_currency: Mapped[str | None] = mapped_column(String(3))
+    cost_fully_configured: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    current_job_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("jobs.id", ondelete="SET NULL"), index=True
+    )
+    frozen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    runs: Mapped[list[ExperimentRun]] = relationship(
+        back_populates="experiment", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class ExperimentRun(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """One stable question × pipeline × repetition cell in an experiment matrix."""
+
+    __tablename__ = "experiment_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "experiment_id",
+            "benchmark_question_id",
+            "pipeline_configuration_id",
+            "repetition_index",
+            name="uq_experiment_run_matrix_cell",
+        ),
+        CheckConstraint("repetition_index >= 1", name="experiment_run_repetition_positive"),
+        CheckConstraint("attempt_count >= 0", name="experiment_run_attempt_count_nonnegative"),
+        CheckConstraint("max_attempts >= 1", name="experiment_run_max_attempts_positive"),
+    )
+
+    experiment_id: Mapped[UUID] = mapped_column(
+        ForeignKey("experiments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    benchmark_question_id: Mapped[UUID] = mapped_column(
+        ForeignKey("benchmark_questions.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    pipeline_configuration_id: Mapped[UUID] = mapped_column(
+        ForeignKey("pipeline_configurations.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    repetition_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    query_text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[ExperimentCellStatus] = mapped_column(
+        enum_type(ExperimentCellStatus, "experiment_cell_status"),
+        default=ExperimentCellStatus.PLANNED,
+        nullable=False,
+        index=True,
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    random_seed: Mapped[int | None] = mapped_column(Integer)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    last_failure_code: Mapped[str | None] = mapped_column(String(100), index=True)
+    last_failure_message: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    experiment: Mapped[Experiment] = relationship(back_populates="runs")
+    query_runs: Mapped[list[QueryRun]] = relationship(
+        back_populates="experiment_run",
+        foreign_keys="QueryRun.experiment_run_id",
+    )
+    attempts: Mapped[list[ExperimentRunAttempt]] = relationship(
+        back_populates="experiment_run", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class ExperimentRunAttempt(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Immutable audit row for each execution attempt of a matrix cell."""
+
+    __tablename__ = "experiment_run_attempts"
+    __table_args__ = (
+        UniqueConstraint("experiment_run_id", "attempt_number"),
+        UniqueConstraint("query_run_id"),
+        CheckConstraint("attempt_number >= 1", name="experiment_attempt_number_positive"),
+    )
+
+    experiment_run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("experiment_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[ExperimentAttemptStatus] = mapped_column(
+        enum_type(ExperimentAttemptStatus, "experiment_attempt_status"),
+        nullable=False,
+        index=True,
+    )
+    query_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("query_runs.id", ondelete="RESTRICT"), index=True
+    )
+    failure_code: Mapped[str | None] = mapped_column(String(100), index=True)
+    failure_message: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    experiment_run: Mapped[ExperimentRun] = relationship(back_populates="attempts")
 
 
 class EvaluationResult(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):

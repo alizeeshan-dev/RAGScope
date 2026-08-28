@@ -610,3 +610,262 @@ export interface ExtractionJob {
   job_type?: string;
   error_code?: string | null;
 }
+
+export interface OperationAccepted {
+  job_id: string;
+  job_type: string;
+  status: string;
+  resource_type: string;
+  resource_id: string;
+  status_url: string;
+}
+
+export interface BackgroundJob {
+  id: string;
+  job_type: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | string;
+  progress_current: number;
+  progress_total: number | null;
+  error_code: string | null;
+  error_message: string | null;
+  result_artifact_ids: string[];
+  cancellation_requested_at: string | null;
+}
+
+export type ExperimentStatus =
+  | "draft"
+  | "frozen"
+  | "running"
+  | "paused"
+  | "completed"
+  | "completed_with_failures"
+  | "failed"
+  | "cancelled";
+
+export interface ExperimentProgress {
+  total: number;
+  planned: number;
+  running: number;
+  retryable: number;
+  succeeded: number;
+  failed: number;
+}
+
+export interface PipelineCostEstimate {
+  pipeline_configuration_id: string;
+  run_count: number;
+  maximum_generation_input_tokens: number;
+  maximum_generation_output_tokens: number;
+  maximum_embedding_input_tokens: number;
+  maximum_reranker_calls: number;
+  generation_cost: number | null;
+  embedding_cost: number | null;
+  reranker_cost: number | null;
+  maximum_expected_cost: number | null;
+  currency: string;
+  missing_pricing: string[];
+}
+
+export interface ExperimentCostEstimate {
+  experiment_id: string;
+  run_count: number;
+  per_pipeline: PipelineCostEstimate[];
+  maximum_expected_cost: number | null;
+  currency: string | null;
+  cost_fully_configured: boolean;
+}
+
+export interface Experiment {
+  id: string;
+  name: string;
+  research_question: string;
+  corpus_version_id: string;
+  benchmark_version_id: string;
+  pipeline_configuration_ids: string[];
+  repetitions: number;
+  status: ExperimentStatus | string;
+  code_commit: string;
+  stop_on_error: boolean;
+  dependency_snapshot: Record<string, unknown>;
+  configuration_hash: string | null;
+  retry_policy: Record<string, unknown>;
+  analysis_configuration?: Record<string, unknown>;
+  progress?: ExperimentProgress;
+  cost_estimate?: ExperimentCostEstimate | null;
+  created_at: string;
+  frozen_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface ExperimentExecutionReport {
+  experiment: Experiment;
+  progress: ExperimentProgress;
+  executed_attempts: number;
+}
+
+export interface HumanReviewQueueItem {
+  query_run_id: string;
+  benchmark_question_id: string;
+  pipeline_configuration_id: string;
+  missing_labels: string[];
+}
+
+export interface HumanReviewQueuePage {
+  items: HumanReviewQueueItem[];
+  total: number;
+  reviewed: number;
+  remaining: number;
+  offset: number;
+  limit: number;
+}
+
+export interface ExperimentDetail {
+  experiment: Experiment;
+  progress: ExperimentProgress;
+}
+
+export interface AnalysisMetricObservation {
+  name: string;
+  version: string;
+  scope: string;
+  method: string;
+  value: number | null;
+  details: Record<string, unknown>;
+}
+
+export interface AnalysisEvidenceSurvival {
+  retrieval: number | null;
+  reranking: number | null;
+  context: number | null;
+  metric_version: string;
+}
+
+export interface ExperimentAnalysisRun {
+  run_id: string;
+  pipeline_id: string;
+  question_id: string;
+  run_status: string;
+  infrastructure_failure_code: string | null;
+  dimensions: Record<string, string | number | boolean | null>;
+  metrics: AnalysisMetricObservation[];
+  evidence_survival: AnalysisEvidenceSurvival | null;
+}
+
+export interface ExperimentAggregate {
+  group: Array<[string, string | number | boolean | null]>;
+  metric_name: string;
+  metric_version: string;
+  metric_scope: string;
+  evaluation_method: string;
+  denominator_policy: { exclude_infrastructure_failures: boolean; description: string };
+  total_run_count: number;
+  denominator_count: number;
+  missing_metric_count: number;
+  excluded_infrastructure_count: number;
+  value_sum: number | null;
+  mean: number | null;
+  median: number | null;
+  contributing_run_ids: string[];
+  missing_run_ids: string[];
+  excluded_run_ids: string[];
+}
+
+export interface ExperimentResultsResponse {
+  experiment_id: string;
+  filters: Record<string, unknown>;
+  sample_size: number;
+  infrastructure_failures: number;
+  aggregates: ExperimentAggregate[];
+  evidence_survival: ExperimentAggregate[];
+  adaptive_analysis: Record<string, unknown> | null;
+  headline_metrics: Record<string, ExperimentHeadlineMetric>;
+  visualizations: ExperimentVisualizationData;
+  available_dimensions: Record<string, string[]>;
+  runs: ExperimentAnalysisRun[];
+  offset?: number;
+  limit?: number;
+  total_runs?: number;
+}
+
+export interface ExperimentHeadlineMetric {
+  value: number | null;
+  numerator: number | null;
+  denominator: number;
+  missing: number;
+  excluded_infrastructure: number;
+}
+
+export interface ExperimentVisualizationData {
+  cost_correctness: Array<{ run_id: string; pipeline: string; correctness: number; cost: number; currency: string | null }>;
+  latency_by_pipeline: Array<{ pipeline: string; n: number; missing: number; infrastructure_failures: number; minimum: number | null; q1: number | null; median: number | null; q3: number | null; maximum: number | null }>;
+  failure_distribution: Array<{ stage: string; category: string; code: string | null; count: number }>;
+  performance_by_question_type: Array<{ question_type: string; pipeline: string; value: number | null; n: number; denominator: number; missing: number; excluded_infrastructure: number }>;
+}
+
+export interface ExperimentMetricValue {
+  metric_name: string;
+  metric_value: number | null;
+  metric_version: string;
+  evaluation_method: string;
+  denominator?: number | null;
+}
+
+export interface ExperimentResultRow {
+  query_run_id: string;
+  benchmark_question_id: string;
+  pipeline_configuration_id: string;
+  pipeline_name: string;
+  repetition: number;
+  question_type: string;
+  difficulty: string;
+  answerability: string;
+  pipeline_mode: string;
+  run_status: string;
+  infrastructure_failure: boolean;
+  failure_stage: string | null;
+  failure_category: string | null;
+  failure_code: string | null;
+  total_latency_ms: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  estimated_cost: number | null;
+  cost_currency: string | null;
+  retrieval_required_count: number | null;
+  retrieval_evidence_count: number | null;
+  reranking_evidence_count: number | null;
+  context_evidence_count: number | null;
+  metrics: ExperimentMetricValue[];
+}
+
+export interface ExperimentResultsFilters {
+  pipeline_configuration_ids: string[];
+  question_types: string[];
+  difficulties: string[];
+  run_statuses: string[];
+  answerabilities: string[];
+  pipeline_modes: string[];
+  failure_stages: string[];
+  failure_categories: string[];
+  failure_codes: string[];
+  include_infrastructure_failures: boolean;
+}
+
+export interface ExperimentResults {
+  schema_version: string;
+  experiment_id: string;
+  generated_at: string;
+  filters: ExperimentResultsFilters;
+  total_rows: number;
+  offset: number;
+  limit: number;
+  rows: ExperimentResultRow[];
+  available_question_types: string[];
+  available_difficulties: string[];
+  available_pipeline_ids: string[];
+  aggregates: ExperimentAggregate[];
+  evidence_survival: ExperimentAggregate[];
+  headline_metrics: Record<string, ExperimentHeadlineMetric>;
+  visualizations: ExperimentVisualizationData;
+  available_dimensions: Record<string, string[]>;
+}

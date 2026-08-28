@@ -4,23 +4,27 @@ from dataclasses import asdict
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.app.api.routes.documents import get_artifact_store
+from backend.app.artifacts.service import LocalArtifactStore
+from backend.app.core.config import Settings, get_settings
 from backend.app.core.errors import DomainError
 from backend.app.db.models import SearchIndex
 from backend.app.db.session import get_db
 from backend.app.indexing.api_schemas import (
     IndexStatusRead,
-    JobRead,
+    OperationAccepted,
     SearchRequest,
     SearchResultRead,
 )
 from backend.app.indexing.errors import IndexingError
-from backend.app.indexing.jobs import IndexingJobRunner
 from backend.app.indexing.schemas import SearchFilters
 from backend.app.indexing.service import IndexingService
+from backend.app.jobs.api_contract import receipt, run_inline_for_bounded_wait
+from backend.app.jobs.service import create_job
 from backend.app.providers.registry import create_embedding_provider
 
 router = APIRouter(tags=["indexing"])
@@ -40,19 +44,44 @@ def _domain_error(exc: IndexingError) -> DomainError:
     return DomainError(exc.code, str(exc), status_code=status_code)
 
 
-@router.post("/corpus-versions/{version_id}/index", response_model=JobRead)
-def build_indexes(version_id: UUID, session: SessionDependency) -> object:
-    service = _service(session, version_id)
-    runner = IndexingJobRunner(session, service)
-    try:
-        job = runner.run(version_id)
-        session.commit()
-        session.refresh(job)
-        return job
-    except IndexingError as exc:
-        # Persist controlled failure/job diagnostics instead of rolling them back.
-        session.commit()
-        raise _domain_error(exc) from exc
+@router.post(
+    "/corpus-versions/{version_id}/index",
+    response_model=OperationAccepted,
+    status_code=202,
+)
+def build_indexes(
+    version_id: UUID,
+    response: Response,
+    session: SessionDependency,
+    settings: Annotated[Settings, Depends(get_settings)],
+    artifact_store: Annotated[LocalArtifactStore, Depends(get_artifact_store)],
+    wait: bool | None = None,
+    timeout_seconds: Annotated[int, Query(ge=1, le=60)] = 30,
+) -> OperationAccepted:
+    from backend.app.corpora.service import get_version_or_error
+
+    version = get_version_or_error(session, version_id)
+    job, _created = create_job(
+        session,
+        job_type="build_indexes",
+        input_reference={
+            "corpus_version_id": str(version.id),
+            "embedding_configuration": version.embedding_configuration,
+        },
+        idempotency_key=f"index:{version.id}:{version.content_hash or 'draft'}",
+        progress_total=2,
+    )
+    session.commit()
+    if settings.job_api_default_wait if wait is None else wait:
+        completed = run_inline_for_bounded_wait(
+            session,
+            job,
+            settings=settings,
+            artifact_store=artifact_store,
+            timeout_seconds=timeout_seconds,
+        )
+        response.status_code = 200 if completed else 202
+    return receipt(job, resource_type="corpus_version", resource_id=version.id)
 
 
 @router.get(

@@ -1,0 +1,63 @@
+{
+  "schema_version": "ragscope-research-figures.v1",
+  "pipeline_label_dimension": "pipeline_name",
+  "question_type_dimension": "question_type",
+  "failure_stage_dimension": "primary_failure_stage",
+  "evidence_survival_version": "evidence-survival.v1",
+  "evidence_survival_policy": {
+    "exclude_infrastructure_failures": true,
+    "description": "non-infrastructure runs with stored human-grounded evidence survival"
+  },
+  "metric_selectors": {
+    "retrieval_recall": {
+      "name": "recall_at_k",
+      "version": "retrieval-evidence-v1",
+      "scope": "retrieval",
+      "method": "deterministic_human_benchmark_evidence",
+      "denominator_policy": {
+        "exclude_infrastructure_failures": true,
+        "description": "non-infrastructure runs with stored human benchmark evidence"
+      }
+    },
+    "answer_correctness": {
+      "name": "answer_correctness",
+      "version": "generation-quality-v1",
+      "scope": "generation",
+      "method": "human",
+      "denominator_policy": {
+        "exclude_infrastructure_failures": true,
+        "description": "non-infrastructure runs with a stored human correctness label"
+      }
+    },
+    "citation_support_rate": {
+      "name": "claim_support_rate",
+      "version": "citation-metrics-v1",
+      "scope": "citation",
+      "method": "automated",
+      "denominator_policy": {
+        "exclude_infrastructure_failures": true,
+        "description": "non-infrastructure runs with stored automatic citation judgments"
+      }
+    },
+    "estimated_cost": {
+      "name": "estimated_cost",
+      "version": "operational-metrics.v1",
+      "scope": "cost",
+      "method": "operational",
+      "denominator_policy": {
+        "exclude_infrastructure_failures": false,
+        "description": "all runs with stored estimated cost"
+      }
+    },
+    "total_latency": {
+      "name": "total_latency_ms",
+      "version": "operational-metrics.v1",
+      "scope": "overall",
+      "method": "operational",
+      "denominator_policy": {
+        "exclude_infrastructure_failures": false,
+        "description": "all runs with stored total latency"
+      }
+    }
+  }
+}

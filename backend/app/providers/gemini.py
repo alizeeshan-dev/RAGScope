@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import math
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 from urllib.parse import quote
 
@@ -38,6 +39,176 @@ _GEMINI_SCHEMA_KEYS = {
     "title",
     "type",
 }
+
+
+class GeminiEmbeddingProviderError(RuntimeError):
+    """Sanitized Gemini embedding failure safe for job diagnostics."""
+
+
+class GeminiEmbeddingProvider:
+    """Native Gemini ``batchEmbedContents`` adapter for a symmetric index.
+
+    RAGScope's embedding protocol is deliberately symmetric: the same method is
+    used for documents and queries.  Consequently this adapter fixes Gemini's
+    task type to ``SEMANTIC_SIMILARITY`` instead of silently embedding indexed
+    text and queries with incompatible retrieval task types.  Returned vectors
+    are L2-normalized before persistence so reduced-dimensional embeddings have
+    a stable cosine representation.
+    """
+
+    provider_id = "gemini"
+
+    def __init__(
+        self,
+        *,
+        model_id: str,
+        dimension: int,
+        base_url: str,
+        api_key: str,
+        timeout_seconds: float,
+        batch_size: int = 100,
+        task_type: str = "SEMANTIC_SIMILARITY",
+        client: httpx.Client | None = None,
+    ) -> None:
+        if not api_key:
+            raise ValueError("RAGSCOPE_GEMINI_API_KEY is required for Gemini embeddings")
+        if dimension < 1 or dimension > 4096:
+            raise ValueError("Gemini embedding dimension must be between 1 and 4096")
+        if timeout_seconds <= 0:
+            raise ValueError("Gemini embedding timeout must be positive")
+        if batch_size < 1 or batch_size > 100:
+            raise ValueError("Gemini embedding batch size must be between 1 and 100")
+        if task_type != "SEMANTIC_SIMILARITY":
+            raise ValueError(
+                "Gemini embeddings require SEMANTIC_SIMILARITY for RAGScope's "
+                "shared document/query provider"
+            )
+        self._model_id = model_id.removeprefix("models/")
+        if not self._model_id:
+            raise ValueError("Gemini embedding model must not be empty")
+        self._dimension = dimension
+        self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
+        self._timeout_seconds = timeout_seconds
+        self._batch_size = batch_size
+        self._task_type = task_type
+        self._client = client or httpx.Client()
+
+    @classmethod
+    def from_settings(
+        cls,
+        settings: Settings,
+        *,
+        model_id: str | None = None,
+        dimension: int | None = None,
+        timeout_seconds: float | None = None,
+        batch_size: int | None = None,
+        task_type: str | None = None,
+        client: httpx.Client | None = None,
+    ) -> GeminiEmbeddingProvider:
+        if settings.gemini_api_key is None:
+            raise ValueError("RAGSCOPE_GEMINI_API_KEY is required for Gemini embeddings")
+        return cls(
+            model_id=(
+                model_id if model_id is not None else settings.gemini_embedding_model
+            ),
+            dimension=(
+                dimension if dimension is not None else settings.gemini_embedding_dimension
+            ),
+            base_url=settings.gemini_base_url,
+            api_key=settings.gemini_api_key.get_secret_value(),
+            timeout_seconds=(
+                timeout_seconds
+                if timeout_seconds is not None
+                else settings.embedding_timeout_seconds
+            ),
+            batch_size=(
+                batch_size if batch_size is not None else settings.gemini_embedding_batch_size
+            ),
+            task_type=(
+                task_type if task_type is not None else settings.gemini_embedding_task_type
+            ),
+            client=client,
+        )
+
+    @property
+    def model_id(self) -> str:
+        return self._model_id
+
+    @property
+    def dimension(self) -> int:
+        return self._dimension
+
+    @property
+    def preprocessing_version(self) -> str:
+        return f"gemini-{self._task_type.casefold().replace('_', '-')}-l2-v1"
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        vectors: list[list[float]] = []
+        for offset in range(0, len(texts), self._batch_size):
+            vectors.extend(self._embed_batch(texts[offset : offset + self._batch_size]))
+        if len(vectors) != len(texts):
+            raise GeminiEmbeddingProviderError(
+                "Gemini embedding response count did not match the request"
+            )
+        return vectors
+
+    def _embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
+        model_name = f"models/{self.model_id}"
+        payload = {
+            "requests": [
+                {
+                    "model": model_name,
+                    "content": {"parts": [{"text": text}]},
+                    "taskType": self._task_type,
+                    "outputDimensionality": self.dimension,
+                }
+                for text in texts
+            ]
+        }
+        try:
+            response = self._client.post(
+                f"{self._base_url}/v1beta/models/"
+                f"{quote(self.model_id, safe='')}:batchEmbedContents",
+                headers={
+                    "x-goog-api-key": self._api_key,
+                    "x-goog-api-client": "ragscope/0.1.0",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=self._timeout_seconds,
+            )
+            response.raise_for_status()
+            parsed = response.json()
+            embeddings = parsed["embeddings"]
+            if not isinstance(embeddings, list) or len(embeddings) != len(texts):
+                raise ValueError("unexpected embedding count")
+            return [self._validated_vector(item["values"]) for item in embeddings]
+        except (
+            httpx.HTTPError,
+            AttributeError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            # Never copy provider bodies, URLs, request headers, or source text
+            # into an error that may be persisted with an indexing job.
+            raise GeminiEmbeddingProviderError(
+                f"Gemini embedding request failed ({type(exc).__name__})"
+            ) from exc
+
+    def _validated_vector(self, values: object) -> list[float]:
+        if not isinstance(values, list) or len(values) != self.dimension:
+            raise ValueError("unexpected embedding dimension")
+        vector = [float(value) for value in values]
+        if not all(math.isfinite(value) for value in vector):
+            raise ValueError("embedding contains a non-finite value")
+        norm = math.sqrt(sum(value * value for value in vector))
+        if norm == 0:
+            raise ValueError("embedding has zero magnitude")
+        return [value / norm for value in vector]
 
 
 def _gemini_json_schema(value: object) -> object:

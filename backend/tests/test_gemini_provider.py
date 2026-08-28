@@ -168,7 +168,17 @@ def test_gemini_registry_uses_gemini_specific_settings() -> None:
     ("provider_exception", "expected"),
     [
         (httpx.ReadTimeout("slow Gemini"), GenerationTimeoutError),
-        (httpx.HTTPStatusError("bad", request=httpx.Request("GET", "http://test"), response=httpx.Response(400, request=httpx.Request("GET", "http://test"))), GenerationProviderError),
+        (
+            httpx.HTTPStatusError(
+                "bad",
+                request=httpx.Request("GET", "http://test"),
+                response=httpx.Response(
+                    400,
+                    request=httpx.Request("GET", "http://test"),
+                ),
+            ),
+            GenerationProviderError,
+        ),
     ],
 )
 def test_gemini_provider_failures_are_typed_and_secret_safe(

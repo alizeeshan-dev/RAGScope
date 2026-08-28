@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.app.db.models import EvaluationMetricScope
 
@@ -64,14 +64,35 @@ class HumanMetricCreate(BaseModel):
     metric_name: Literal[
         "answer_correctness",
         "answer_completeness",
+        "appropriate_abstention",
         "partial_answer_accuracy",
         "false_premise_recognition",
+        "claim_support_rate",
+        "citation_precision",
         "unsupported_claim_count.human",
         "contradiction_count.human",
     ]
     metric_value: float | None = Field(default=None, ge=0)
     reviewer_label: str = Field(min_length=1, max_length=255)
     reviewer_note: str | None = Field(default=None, max_length=20_000)
+
+    @model_validator(mode="after")
+    def validate_metric_range(self) -> HumanMetricCreate:
+        if (
+            self.metric_value is not None
+            and self.metric_name
+            not in {"unsupported_claim_count.human", "contradiction_count.human"}
+            and self.metric_value > 1
+        ):
+            raise ValueError("Human rate and quality labels must be between 0 and 1")
+        if (
+            self.metric_value is not None
+            and self.metric_name
+            in {"unsupported_claim_count.human", "contradiction_count.human"}
+            and not self.metric_value.is_integer()
+        ):
+            raise ValueError("Human count labels must be whole numbers")
+        return self
 
 
 class FailureOverrideCreate(BaseModel):
@@ -111,4 +132,3 @@ class CitationVerificationRead(BaseModel):
     human_note: str | None
     human_reviewed_at: datetime | None
     created_at: datetime
-

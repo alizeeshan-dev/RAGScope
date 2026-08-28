@@ -15,7 +15,9 @@ from backend.app.core.config import Settings, get_settings
 from backend.app.corpora.hashing import canonical_json
 from backend.app.db.models import DatasetRecord, JobStatus, SourceDocument
 from backend.app.db.session import get_db
-from backend.app.jobs.service import complete_job, create_job, fail_job, start_job
+from backend.app.indexing.api_schemas import OperationAccepted
+from backend.app.jobs.api_contract import receipt, run_inline_for_bounded_wait
+from backend.app.jobs.service import create_job
 from backend.app.providers.base import GenerationProvider
 from backend.app.providers.registry import create_generation_provider
 
@@ -34,7 +36,6 @@ from .schemas import (
 from .service import (
     DatasetCatalogService,
     DatasetEvidenceService,
-    DatasetExtractionService,
     DatasetReviewService,
 )
 from .strategies import DeterministicDatasetGenerationProvider
@@ -69,15 +70,18 @@ def _read(record: DatasetRecord) -> DatasetRecordRead:
 
 @router.post(
     "/documents/{document_id}/extract-datasets",
-    response_model=DatasetExtractionRunRead,
+    response_model=DatasetExtractionRunRead | OperationAccepted,
 )
 def extract_datasets(
     document_id: UUID,
     request: DatasetExtractionRequest,
+    response: Response,
     session: Annotated[Session, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
     artifact_store: Annotated[LocalArtifactStore, Depends(get_dataset_artifact_store)],
-) -> DatasetExtractionRunRead:
+    wait: bool | None = None,
+    timeout_seconds: Annotated[int, Query(ge=1, le=60)] = 30,
+) -> DatasetExtractionRunRead | OperationAccepted:
     document = session.get(SourceDocument, document_id)
     if document is None:
         raise DatasetExtractionError("DOCUMENT_NOT_FOUND", "Document not found", status_code=404)
@@ -99,29 +103,28 @@ def extract_datasets(
         return DatasetExtractionRunRead(
             job_id=job.id, record_ids=record_ids, status=job.status.value
         )
-    start_job(job)
-    try:
-        record = DatasetExtractionService(
-            session, artifact_store, _provider(request, settings)
-        ).extract(document.id, request, job=job)
-        artifact_ids = [
-            str(value)
-            for value in (record.raw_response_artifact_id, record.structured_result_artifact_id)
-            if value is not None
-        ]
-        complete_job(job, result_artifact_ids=artifact_ids)
-        session.commit()
-        return DatasetExtractionRunRead(
-            job_id=job.id, record_ids=[record.id], status=job.status.value
+    session.commit()
+    if not (settings.job_api_default_wait if wait is None else wait):
+        response.status_code = 202
+        return receipt(job, resource_type="document", resource_id=document.id)
+    completed = run_inline_for_bounded_wait(
+        session,
+        job,
+        settings=settings,
+        artifact_store=artifact_store,
+        timeout_seconds=timeout_seconds,
+    )
+    if not completed:
+        response.status_code = 202
+        return receipt(job, resource_type="document", resource_id=document.id)
+    record_ids = list(
+        session.scalars(
+            select(DatasetRecord.id).where(DatasetRecord.extraction_job_id == job.id)
         )
-    except Exception as exc:
-        fail_job(
-            job,
-            error_code=getattr(exc, "code", "DATASET_EXTRACTION_FAILED"),
-            error_message=str(exc)[:2_000],
-        )
-        session.commit()
-        raise
+    )
+    return DatasetExtractionRunRead(
+        job_id=job.id, record_ids=record_ids, status=job.status.value
+    )
 
 
 @router.get("/dataset-records", response_model=list[DatasetRecordRead])

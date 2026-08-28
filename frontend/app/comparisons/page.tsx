@@ -26,10 +26,12 @@ export default function ComparisonsPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    Promise.all([api.listCorpora(), api.listPipelines()])
-      .then(([nextCorpora, nextPipelines]) => {
+    const comparisonId = new URLSearchParams(window.location.search).get("comparison");
+    Promise.all([api.listCorpora(), api.listPipelines(), comparisonId ? api.getComparison(comparisonId) : Promise.resolve(null)])
+      .then(([nextCorpora, nextPipelines, storedComparison]) => {
         setCorpora(nextCorpora);
         setPipelines(nextPipelines);
+        setComparison(storedComparison);
       })
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not load comparison controls"));
   }, []);
@@ -44,12 +46,16 @@ export default function ComparisonsPage() {
     setError("");
     const form = new FormData(event.currentTarget);
     try {
-      setComparison(await api.createComparison({
+      const created = await api.createComparison({
         corpus_version_id: String(form.get("corpus_version_id")),
         question: String(form.get("question")),
         pipeline_configuration_ids: selected,
         filters: { document_ids: [], publication_years: [] },
-      }));
+      });
+      setComparison(created);
+      const url = new URL(window.location.href);
+      url.searchParams.set("comparison", created.id);
+      window.history.replaceState(null, "", url);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Comparison failed");
     } finally {

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from backend.app.db.models import Job
 from backend.app.db.session import get_db
 from backend.app.indexing.api_schemas import JobRead
+from backend.app.jobs.service import request_job_cancellation
 
 router = APIRouter(tags=["jobs"])
 
@@ -31,3 +32,16 @@ def list_jobs(
             select(Job).order_by(Job.created_at.desc(), Job.id).offset(offset).limit(limit)
         )
     )
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=JobRead)
+def cancel_queued_or_running_job(
+    job_id: UUID, session: Annotated[Session, Depends(get_db)]
+) -> Job:
+    job = session.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    request_job_cancellation(job)
+    session.commit()
+    session.refresh(job)
+    return job

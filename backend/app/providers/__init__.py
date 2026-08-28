@@ -14,6 +14,8 @@ from .fake import (
     DeterministicGenerationProvider,
     DeterministicReranker,
 )
+from .gemini import GeminiEmbeddingProvider, GeminiGenerationProvider
+from .local_cross_encoder import SentenceTransformersCrossEncoderReranker
 from .openai_compatible import OpenAICompatibleGenerationProvider
 
 __all__ = [
@@ -23,9 +25,12 @@ __all__ = [
     "EmbeddingProvider",
     "GenerationProvider",
     "GenerationResult",
+    "GeminiEmbeddingProvider",
+    "GeminiGenerationProvider",
     "OpenAICompatibleGenerationProvider",
     "RerankCandidate",
     "RerankResult",
     "RerankerProvider",
+    "SentenceTransformersCrossEncoderReranker",
     "StructuredGenerationResult",
 ]

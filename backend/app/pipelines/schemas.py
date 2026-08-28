@@ -34,8 +34,12 @@ class FusionConfiguration(BaseModel):
 
 class RerankerConfiguration(BaseModel):
     enabled: bool = False
-    provider: Literal["fake"] = "fake"
+    provider: Literal["fake", "sentence_transformers_cross_encoder"] = "fake"
     model: str = Field(default="fake-token-overlap-reranker-v1", min_length=1, max_length=255)
+    model_revision: str | None = Field(default=None, min_length=1, max_length=255)
+    batch_size: int = Field(default=16, ge=1, le=1024)
+    device: str | None = Field(default=None, min_length=1, max_length=100)
+    local_files_only: bool = True
     input_candidate_count: int = Field(default=20, ge=1, le=200)
     final_count: int = Field(default=10, ge=1, le=100)
 

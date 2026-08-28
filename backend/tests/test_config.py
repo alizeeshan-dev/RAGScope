@@ -9,7 +9,7 @@ def test_settings_have_safe_fake_provider_defaults() -> None:
     settings = Settings(_env_file=None)
     assert settings.embedding_provider == "fake"
     assert settings.embedding_dimension == 64
-    assert settings.artifact_root == Path("var/artifacts")
+    assert settings.artifact_root == (Path.cwd() / "var/artifacts").resolve()
 
 
 def test_settings_reject_artifacts_inside_application_source() -> None:

@@ -23,6 +23,22 @@ class JobRead(BaseModel):
     result_artifact_ids: list[str]
     started_at: datetime | None
     finished_at: datetime | None
+    available_at: datetime | None
+    heartbeat_at: datetime | None
+    lease_expires_at: datetime | None
+    cancellation_requested_at: datetime | None
+    max_attempts: int
+
+
+class OperationAccepted(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    job_id: UUID
+    job_type: str
+    status: JobStatus
+    resource_type: str
+    resource_id: UUID
+    status_url: str
 
 
 class IndexStatusRead(BaseModel):

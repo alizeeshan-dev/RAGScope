@@ -3,11 +3,17 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
+from backend.app.api.routes.documents import get_artifact_store
+from backend.app.artifacts.service import LocalArtifactStore
+from backend.app.core.config import Settings, get_settings
 from backend.app.core.errors import DomainError
 from backend.app.db.session import get_db
+from backend.app.indexing.api_schemas import OperationAccepted
+from backend.app.jobs.api_contract import receipt, run_inline_for_bounded_wait
+from backend.app.jobs.service import create_job
 
 from .schemas import (
     CitationVerificationOverrideCreate,
@@ -40,22 +46,51 @@ def get_evaluation(
     )
 
 
-@router.post("/query-runs/{run_id}/evaluation", response_model=EvaluationBundleRead)
+@router.post(
+    "/query-runs/{run_id}/evaluation",
+    response_model=EvaluationBundleRead | OperationAccepted,
+)
 def evaluate_run(
     run_id: UUID,
     payload: EvaluationTrigger,
+    response: Response,
     session: Annotated[Session, Depends(get_db)],
-) -> EvaluationBundleRead:
+    settings: Annotated[Settings, Depends(get_settings)],
+    artifact_store: Annotated[LocalArtifactStore, Depends(get_artifact_store)],
+    wait: bool | None = None,
+    timeout_seconds: Annotated[int, Query(ge=1, le=60)] = 30,
+) -> EvaluationBundleRead | OperationAccepted:
     service = EvaluationService(session)
     try:
         run = service.get_run(run_id)
-        service.evaluate(
-            run.id,
-            metric_versions=set(payload.metric_versions) if payload.metric_versions else None,
+        job, _created = create_job(
+            session,
+            job_type="query_evaluation",
+            input_reference={
+                "query_run_id": str(run.id),
+            "metric_versions": list(payload.metric_versions or []),
+            },
+            idempotency_key=(
+                f"evaluation:{run.id}:" + ",".join(sorted(payload.metric_versions or []))
+            ),
+            progress_total=1,
         )
     except LookupError as exc:
         raise DomainError("QUERY_RUN_NOT_FOUND", str(exc), status_code=404) from exc
     session.commit()
+    if not (settings.job_api_default_wait if wait is None else wait):
+        response.status_code = 202
+        return receipt(job, resource_type="query_run", resource_id=run.id)
+    completed = run_inline_for_bounded_wait(
+        session,
+        job,
+        settings=settings,
+        artifact_store=artifact_store,
+        timeout_seconds=timeout_seconds,
+    )
+    if not completed:
+        response.status_code = 202
+        return receipt(job, resource_type="query_run", resource_id=run.id)
     return EvaluationBundleRead(
         query_run_id=run.id,
         benchmark_question_id=run.benchmark_question_id,

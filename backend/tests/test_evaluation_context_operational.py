@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import typing
 from uuid import uuid4
 
 import pytest
@@ -13,8 +14,6 @@ from backend.app.evaluation.metrics.operational import (
     evaluate_operational,
 )
 
-
-import typing
 
 def _values(outputs: typing.Sequence[typing.Any]) -> dict[str, float | None]:
     return {output.name: output.value for output in outputs}

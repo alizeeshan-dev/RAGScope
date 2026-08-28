@@ -19,6 +19,9 @@ from backend.app.db.models import (
     ContextSource,
     EvaluationMetricScope,
     EvaluationResult,
+    Experiment,
+    ExperimentRun,
+    ExperimentStatus,
     FailureAttribution,
     GeneratedClaim,
     QueryRun,
@@ -110,7 +113,11 @@ class EvaluationService:
             )
         )
         citation_outputs, judgments = self._citation_metrics(
-            run, claims, citations, uuid_sets
+            run,
+            claims,
+            citations,
+            uuid_sets,
+            update_raw_annotations=self._raw_annotations_mutable(run),
         )
         outputs.extend(citation_outputs)
         human = self._human_generation_labels(run.id)
@@ -239,7 +246,11 @@ class EvaluationService:
         output = MetricOutput(
             name=payload.metric_name,
             version="human-review.v1",
-            scope=MetricScope.GENERATION,
+            scope=(
+                MetricScope.CITATION
+                if payload.metric_name in {"claim_support_rate", "citation_precision"}
+                else MetricScope.GENERATION
+            ),
             value=payload.metric_value,
             method="human",
             details=snapshot,
@@ -404,6 +415,8 @@ class EvaluationService:
         claims: list[GeneratedClaim],
         citations: list[Citation],
         uuid_sets: tuple[frozenset[UUID], ...] | None,
+        *,
+        update_raw_annotations: bool,
     ) -> tuple[list[MetricOutput], tuple[CitationJudgment, ...]]:
         context_citations = {
             source.chunk_id: source.citation_id
@@ -469,8 +482,9 @@ class EvaluationService:
                     },
                 )
                 self.session.add(row)
-            citation.entailment_status = judgment.automatic_support
-            citation.entailment_score = judgment.automatic_score
+            if update_raw_annotations:
+                citation.entailment_status = judgment.automatic_support
+                citation.entailment_score = judgment.automatic_score
             if row.human_label is not None:
                 human_support = (
                     "unsupported" if row.human_label == "irrelevant" else row.human_label
@@ -503,8 +517,22 @@ class EvaluationService:
                 )
                 if output.method is EvaluationMethod.HUMAN
             )
-        self._apply_claim_support(claims, tuple(reviewed_judgments))
+        if update_raw_annotations:
+            self._apply_claim_support(claims, tuple(reviewed_judgments))
         return outputs, tuple(reviewed_judgments)
+
+    def _raw_annotations_mutable(self, run: QueryRun) -> bool:
+        if run.experiment_run_id is None:
+            return True
+        status = self.session.scalar(
+            select(Experiment.status)
+            .join(ExperimentRun, ExperimentRun.experiment_id == Experiment.id)
+            .where(ExperimentRun.id == run.experiment_run_id)
+        )
+        return status not in {
+            ExperimentStatus.COMPLETED,
+            ExperimentStatus.COMPLETED_WITH_FAILURES,
+        }
 
     @staticmethod
     def _apply_claim_support(
@@ -669,6 +697,7 @@ class EvaluationService:
             details=output.details,
             input_snapshot=input_snapshot,
             input_hash=input_hash,
+            created_at=datetime.now(UTC),
         )
         self.session.add(row)
         self.session.flush()

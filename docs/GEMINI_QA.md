@@ -346,90 +346,255 @@ Preserve every Chunk 1–4 invariant above. Chunk 5 measures stored observable o
 - Classifier, router, metrics, judge prompts, verifier, taxonomy, and attribution rules are versioned or snapshotted.
 - Adaptive routes are deterministic, capability-safe, reasoned, persisted/traced, and executed through the existing pipeline.
 - Fixed pipelines, Gemini generation, human benchmark annotations, observable traces, comparisons, dataset extraction/review, and all earlier migrations remain intact.
- 
- #   G E M I N I   Q A   R O U N D   1   � �    C H U N K S   1 � �  5  
-  
- # #   E n v i r o n m e n t   T e s t e d  
- -   * * O S * * :   W i n d o w s   h o s t   ( N o   D o c k e r   i n s t a l l e d )  
- -   * * D a t a b a s e * * :   S Q L i t e   ( i n - m e m o r y / l o c a l   f o r   t e s t s )  
- -   * * P o s t g r e S Q L / p g v e c t o r * * :   B L O C K E D   ( D o c k e r   u n a v a i l a b l e   i n   t h e   e n v i r o n m e n t )  
- -   * * F r o n t e n d * * :   N o d e . j s ,   N e x t . j s   ( T u r b o p a c k )  
- -   * * B a c k e n d * * :   P y t h o n   3 . 1 3 ,   F a s t A P I ,   S Q L A l c h e m y ,   p y t e s t ,   m y p y ,   r u f f  
-  
- # #   C o m m a n d s   R u n  
- -   ` n p m   i n s t a l l   & &   n p m   r u n   b u i l d `   ( F r o n t e n d   b u i l d )  
- -   ` n p m   r u n   l i n t `   ( F r o n t e n d   l i n t i n g )  
- -   ` p y t e s t   b a c k e n d / t e s t s   - - b a s e t e m p = . . . `   ( B a c k e n d   t e s t s )  
- -   ` m y p y   b a c k e n d `   ( B a c k e n d   t y p e   c h e c k i n g )  
- -   ` r u f f   c h e c k   b a c k e n d `   ( B a c k e n d   l i n t i n g )  
- -   ` a l e m b i c   u p g r a d e   h e a d `   ( B l o c k e d   d u e   t o   m i s s i n g   P o s t g r e S Q L   D B   c o n t a i n e r )  
-  
- # #   A u t o m a t e d   T e s t   S u m m a r y  
- -   * * B a c k e n d   P y t e s t * * :   1 8 5   p a s s e d ,   0   f a i l e d ,   1   w a r n i n g   ( d e p r e c a t i o n ) .   ( P A S S )  
- -   * * B a c k e n d   R u f f * * :   0   i s s u e s   f o u n d .   ( P A S S )  
- -   * * B a c k e n d   M y p y * * :   I n i t i a l l y   3 3   e r r o r s   i n   1 2   f i l e s .   F i x e d   b y   G e m i n i   d u r i n g   Q A .   C u r r e n t l y   0   e r r o r s .   ( C O N D I T I O N A L   P A S S   - >   P A S S )  
- -   * * F r o n t e n d   B u i l d * * :   C o m p i l e d   s u c c e s s f u l l y ,   s t a t i c a l l y   g e n e r a t e d   p a g e s   s u c c e s s f u l l y .   ( P A S S )  
- -   * * F r o n t e n d   L i n t * * :   0   e r r o r s .   ( P A S S )  
-  
- # #   M a n u a l   T e s t   S u m m a r y  
- -   M a n u a l   A P I / U I   e x p l o r a t o r y   t e s t i n g   c o u l d   n o t   b e   c o m p l e t e d   b e c a u s e   ` d o c k e r   c o m p o s e `   i s   m i s s i n g   o n   t h e   Q A   h o s t ,   b l o c k i n g   t h e   l a u n c h   o f   t h e   P o s t g r e S Q L   +   p g v e c t o r   ` d b `   c o n t a i n e r   w h i c h   t h e   b a c k e n d   r e q u i r e s .   T h e r e f o r e ,   t h e   a p p l i c a t i o n   c o u l d   n o t   b e   s e r v e d   e n d - t o - e n d .  
- -   E v a l u a t e d   b a c k e n d   c o r r e c t n e s s   p u r e l y   t h r o u g h   t h e   e x h a u s t i v e   a u t o m a t e d   t e s t   s u i t e   w r i t t e n   b y   C o d e x ,   a n d   s t a t i c   a n a l y s i s   t o o l s .  
-  
- # #   D e f e c t s  
-  
- # # #   D e f e c t   1 :   E x t e n s i v e   M y p y   T y p e   I n c o n s i s t e n c i e s  
- -   * * S e v e r i t y * * :   M e d i u m  
- -   * * C o m p o n e n t * * :   B a c k e n d   ( ` t e s t _ e v a l u a t i o n _ g e n e r a t i o n _ c i t a t i o n . p y ` ,   ` t e s t _ e v a l u a t i o n _ c o n t e x t _ o p e r a t i o n a l . p y ` ,   ` t e s t _ r e r a n k i n g _ c o n t e x t . p y ` ,   ` t e s t _ d o c u m e n t _ s e r v i c e . p y ` ,   ` t e s t _ g e m i n i _ p r o v i d e r . p y ` ,   ` t e s t _ r e t r i e v a l . p y ` ,   ` t e s t _ j o b s . p y ` ,   ` t e s t _ c o m p a r i s o n s . p y ` ,   ` a l e m b i c / v e r s i o n s ` )  
- -   * * R e p r o d u c t i o n * * :   R u n   ` m y p y   b a c k e n d `  
- -   * * E x p e c t e d   R e s u l t * * :   0   t y p e   e r r o r s .  
- -   * * A c t u a l   R e s u l t * * :   3 3   t y p e   e r r o r s   r e l a t e d   t o   i n v a r i a n t   s e q u e n c e s   ( ` l i s t `   v s   ` S e q u e n c e ` ) ,   m i s s i n g   r e t u r n   t y p e s ,   m i s s i n g   g e n e r i c   p a r a m e t e r s   o n   ` s a . C o l u m n ` ,   u n m a t c h e d   k w a r g s ,   a n d   i n c o m p l e t e   M o c k   o b j e c t s   ( l i k e   ` h t t p x . H T T P S t a t u s E r r o r ` ) .  
- -   * * L i k e l y   R o o t   C a u s e * * :   S t r i c t   t y p i n g   r u l e s   n o t   s t r i c t l y   e n f o r c e d   d u r i n g   i n i t i a l   r a p i d   i t e r a t i o n   b y   C o d e x ,   s p e c i f i c a l l y   a r o u n d   c o v a r i a n c e   o f   s e q u e n c e s   a n d   ` t y p i n g . A n y ` .  
- -   * * R e c o m m e n d e d   F i x * * :   U p d a t e   t y p e   s i g n a t u r e s   t o   u s e   ` t y p i n g . S e q u e n c e [ t y p i n g . A n y ] `   w h e r e   ` l i s t [ o b j e c t ] `   w a s   u s e d ,   e x p l i c i t l y   p a s s   k e y w o r d   a r g u m e n t s   i n s t e a d   o f   ` * * k w a r g s `   u n p a c k i n g   i n   t e s t s ,   s u p p l y   m i s s i n g   d u m m y   ` r e q u e s t ` / ` r e s p o n s e `   a r g u m e n t s   t o   ` H T T P S t a t u s E r r o r `   m o c k s .   * ( N o t e :   F i x e d   d i r e c t l y   b y   G e m i n i   d u r i n g   Q A   t o   u n b l o c k   s t r i c t   t y p e   v e r i f i c a t i o n ) * .  
-  
- # #   B l o c k e r s  
- -   * * D o c k e r   C o m p o s e   M i s s i n g * * :   C a n n o t   s p i n   u p   P o s t g r e S Q L / p g v e c t o r   d a t a b a s e .  
- -   * * E 2 E   M a n u a l   T e s t i n g * * :   B l o c k e d   b y   t h e   a b o v e .    
-  
- # #   R e g r e s s i o n s  
- -   N o   r e g r e s s i o n s   d e t e c t e d   i n   e x i s t i n g   a u t o m a t e d   t e s t   s u i t e   ( C h u n k   1 - 5   t e s t s   a r e   g r e e n ) .  
-  
- # #   S e c u r i t y   F i n d i n g s  
- -   N o   l e a k e d   A P I   k e y s   o r   s e c r e t s   d e t e c t e d   i n   t h e   r e p o s i t o r y   s o u r c e   c o d e ,   f r o n t e n d   p a y l o a d s ,   o r   e n v i r o n m e n t   e x a m p l e s .  
-  
- # #   R e a l - P r o v i d e r   T e s t s  
- -   * * N o t   P e r f o r m e d * * :   P r e v e n t e d   b y   t h e   l a c k   o f   l o c a l   e n v i r o n m e n t   l a u n c h a b i l i t y   a n d   r e s t r i c t e d   s c o p e   o n   p a i d   A P I   t e s t s .  
-  
- # #   R e m a i n i n g   U n v e r i f i e d   R i s k s  
- -   R e a l   P o s t g r e S Q L / p g v e c t o r   i n t e g r a t i o n   ( S Q L i t e   d o e s   n o t   p e r f e c t l y   m i m i c   p g v e c t o r   b e h a v i o r   o r   P o s t g r e S Q L   f u l l - t e x t   s e a r c h   ` t s _ r a n k _ c d ` ) .  
- -   U I   b r o w s e r - l e v e l   a c c e s s i b i l i t y   a n d   i n t e r a c t i o n   f l o w s .  
- -   R e a l   G e m i n i   p r o v i d e r   n e t w o r k   i n t e r a c t i o n s   a n d   l a t e n c y .  
-  
- - - -  
-  
- # #   F i n a l   Q A   R e p o r t  
-  
- # # #   O v e r a l l   V e r d i c t  
- * * C O N D I T I O N A L   P A S S   � �    p r o c e e d   a f t e r   l i s t e d   f i x e s * *  
-  
- # # #   T e s t   S u m m a r y  
- -   A u t o m a t e d   t e s t s   r u n / p a s s e d / f a i l e d :   1 8 5   /   1 8 5   /   0  
- -   S t a t i c   a n a l y s i s   ( m y p y ) :   3 3   i s s u e s   f o u n d   a n d   r e s o l v e d .   0   r e m a i n i n g .  
- -   M a n u a l   f l o w s   t e s t e d :   0   ( B l o c k e d )  
- -   R e a l - p r o v i d e r   t e s t s :   0  
- -   S e c u r i t y   t e s t s :   S t a t i c   c o d e   s c a n   p a s s e d .  
-  
- # # #   R e s e a r c h - V a l i d i t y   R i s k s  
- -   * * V e c t o r   S e a r c h   F i d e l i t y * * :   S i n c e   a l l   a u t o m a t e d   t e s t s   r u n   a g a i n s t   S Q L i t e   u s i n g   a   f a k e / p o r t a b l e   e m b e d d i n g   r e p r e s e n t a t i o n ,   t h e   a c t u a l   ` p g v e c t o r `   r e c a l l   a n d   p r e c i s i o n   b e h a v i o r   r e m a i n s   e n t i r e l y   u n v e r i f i e d .   I f   t h e   s c h e m a   m a p p i n g s   o r   c o s i n e   s i m i l a r i t i e s   a r e   s l i g h t l y   o f f   i n   P o s t g r e s ,   a d a p t i v e   r o u t i n g   a n d   b e n c h m a r k i n g   w i l l   g i v e   i n c o r r e c t   c o n c l u s i o n s .  
- -   * * P o s t g r e s   F T S   ( ` t s _ r a n k _ c d ` )   F i d e l i t y * * :   S i m i l a r   t o   t h e   a b o v e ,   S Q L i t e   f u l l - t e x t   s e a r c h   b e h a v e s   d i f f e r e n t l y .  
- -   * * D a t a b a s e   M i g r a t i o n s * * :   A l e m b i c   m i g r a t i o n s   h a v e   n o t   b e e n   r u n   a g a i n s t   a   r e a l   P o s t g r e s   d a t a b a s e   t o   v e r i f y   i n d e x   c r e a t i o n   a n d   c o n s t r a i n t   e n f o r c e m e n t .  
-  
- # # #   R e m a i n i n g   Q A   G a p s  
- -   E n d - t o - e n d   i n t e g r a t i o n   w i t h   P o s t g r e S Q L / p g v e c t o r .  
- -   B r o w s e r - n a t i v e   U I   t e s t i n g   a n d   h u m a n - i n - t h e - l o o p   w o r k f l o w   v e r i f i c a t i o n .  
- -   R e a l   A P I   p r o v i d e r   l i m i t s ,   t i m e o u t s ,   a n d   s t r u c t u r e   p a r s i n g   f o r   n a t i v e   G e m i n i   m o d e l s .  
-  
- # # #   C o d e x   F i x   L i s t  
- 1 .   * * [ R E S O L V E D   B Y   Q A ] * *   M e r g e   t h e   m y p y   s t r i c t   t y p i n g   f i x e s   i m p l e m e n t e d   d u r i n g   Q A   ( S e q u e n c e   v s   L i s t   c o v a r i a n c e ,   H T T P S t a t u s E r r o r   k w a r g s ,   G e n e r a t o r   r e t u r n   t y p e s ) .  
- 2 .   * * [ M U S T   D O ] * *   V e r i f y   A l e m b i c   m i g r a t i o n s   a n d   a p p l i c a t i o n   b o o t   m a n u a l l y   a g a i n s t   a   r e a l   P o s t g r e s   i n s t a n c e   b e f o r e   s t a r t i n g   C h u n k   6 .  
- 3 .   * * [ M U S T   D O ] * *   A d d   a u t o m a t e d   C I   i n t e g r a t i o n   t e s t s   t h a t   r u n   a g a i n s t   a   r e a l   ` p o s t g r e s `   d o c k e r   s e r v i c e   t o   e n s u r e   ` p g v e c t o r `   a n d   ` t s _ r a n k _ c d `   b e h a v i o r   i s   l o c k e d   i n ,   p r e v e n t i n g   S Q L i t e - o n l y   f a l s e   c o n f i d e n c e .  
- 
+
+# GEMINI QA ROUND 1 — CHUNKS 1–5
+
+## Environment Tested
+- **OS**: Windows host (No Docker installed)
+- **Database**: SQLite (in-memory/local for tests)
+- **PostgreSQL/pgvector**: BLOCKED (Docker unavailable in the environment)
+- **Frontend**: Node.js, Next.js (Turbopack)
+- **Backend**: Python 3.13, FastAPI, SQLAlchemy, pytest, mypy, ruff
+
+## Commands Run
+- `npm install && npm run build` (Frontend build)
+- `npm run lint` (Frontend linting)
+- `pytest backend/tests --basetemp=...` (Backend tests)
+- `mypy backend` (Backend type checking)
+- `ruff check backend` (Backend linting)
+- `alembic upgrade head` (Blocked due to missing PostgreSQL DB container)
+
+## Automated Test Summary
+- **Backend Pytest**: 185 passed, 0 failed, 1 warning (deprecation). (PASS)
+- **Backend Ruff**: 0 issues found. (PASS)
+- **Backend Mypy**: Initially 33 errors in 12 files. Fixed by Gemini during QA. Currently 0 errors. (CONDITIONAL PASS -> PASS)
+- **Frontend Build**: Compiled successfully, statically generated pages successfully. (PASS)
+- **Frontend Lint**: 0 errors. (PASS)
+
+## Manual Test Summary
+- Manual API/UI exploratory testing could not be completed because `docker compose` is missing on the QA host, blocking the launch of the PostgreSQL + pgvector `db` container which the backend requires. Therefore, the application could not be served end-to-end.
+- Evaluated backend correctness purely through the exhaustive automated test suite written by Codex, and static analysis tools.
+
+## Defects
+
+### Defect 1: Extensive Mypy Type Inconsistencies
+- **Severity**: Medium
+- **Component**: Backend (`test_evaluation_generation_citation.py`, `test_evaluation_context_operational.py`, `test_reranking_context.py`, `test_document_service.py`, `test_gemini_provider.py`, `test_retrieval.py`, `test_jobs.py`, `test_comparisons.py`, `alembic/versions`)
+- **Reproduction**: Run `mypy backend`
+- **Expected Result**: 0 type errors.
+- **Actual Result**: 33 type errors related to invariant sequences (`list` vs `Sequence`), missing return types, missing generic parameters on `sa.Column`, unmatched kwargs, and incomplete Mock objects (like `httpx.HTTPStatusError`).
+- **Likely Root Cause**: Strict typing rules not strictly enforced during initial rapid iteration by Codex, specifically around covariance of sequences and `typing.Any`.
+- **Recommended Fix**: Update type signatures to use `typing.Sequence[typing.Any]` where `list[object]` was used, explicitly pass keyword arguments instead of `**kwargs` unpacking in tests, supply missing dummy `request`/`response` arguments to `HTTPStatusError` mocks. *(Note: Fixed directly by Gemini during QA to unblock strict type verification)*.
+
+## Blockers
+- **Docker Compose Missing**: Cannot spin up PostgreSQL/pgvector database.
+- **E2E Manual Testing**: Blocked by the above.
+
+## Regressions
+- No regressions detected in existing automated test suite (Chunk 1-5 tests are green).
+
+## Security Findings
+- No leaked API keys or secrets detected in the repository source code, frontend payloads, or environment examples.
+
+## Real-Provider Tests
+- **Not Performed**: Prevented by the lack of local environment launchability and restricted scope on paid API tests.
+
+## Remaining Unverified Risks
+- Real PostgreSQL/pgvector integration (SQLite does not perfectly mimic pgvector behavior or PostgreSQL full-text search `ts_rank_cd`).
+- UI browser-level accessibility and interaction flows.
+- Real Gemini provider network interactions and latency.
+
+---
+
+## Final QA Report
+
+### Overall Verdict
+**CONDITIONAL PASS — proceed after listed fixes**
+
+### Test Summary
+- Automated tests run/passed/failed: 185 / 185 / 0
+- Static analysis (mypy): 33 issues found and resolved. 0 remaining.
+- Manual flows tested: 0 (Blocked)
+- Real-provider tests: 0
+- Security tests: Static code scan passed.
+
+### Research-Validity Risks
+- **Vector Search Fidelity**: Since all automated tests run against SQLite using a fake/portable embedding representation, the actual `pgvector` recall and precision behavior remains entirely unverified. If the schema mappings or cosine similarities are slightly off in Postgres, adaptive routing and benchmarking will give incorrect conclusions.
+- **Postgres FTS (`ts_rank_cd`) Fidelity**: Similar to the above, SQLite full-text search behaves differently.
+- **Database Migrations**: Alembic migrations have not been run against a real Postgres database to verify index creation and constraint enforcement.
+
+### Remaining QA Gaps
+- End-to-end integration with PostgreSQL/pgvector.
+- Browser-native UI testing and human-in-the-loop workflow verification.
+- Real API provider limits, timeouts, and structure parsing for native Gemini models.
+
+### Codex Fix List
+1. **[RESOLVED BY QA]** Merge the mypy strict typing fixes implemented during QA (Sequence vs List covariance, HTTPStatusError kwargs, Generator return types).
+2. **[MUST DO]** Verify Alembic migrations and application boot manually against a real Postgres instance before starting Chunk 6.
+3. **[MUST DO]** Add automated CI integration tests that run against a real `postgres` docker service to ensure `pgvector` and `ts_rank_cd` behavior is locked in, preventing SQLite-only false confidence.
+
+# Chunk 6 — Experiment System and Results Dashboard
+
+## Implemented experiment workflow
+
+- Create, inspect, estimate, freeze, start, and resume experiments through the typed experiment API and Experiment Manager.
+- Freeze validates a ready/frozen corpus, frozen benchmark, reviewed questions, frozen pipelines/router, prompt snapshots, provider availability, and required indexes.
+- The dependency snapshot records actual corpus, benchmark, question, pipeline, prompt, model, index, router, metric, citation-verifier, taxonomy, attribution-rule, pricing, repetition, deterministic-seed, and code-commit data without secrets.
+- The run matrix has a deterministic SHA-256 idempotency key and UUID for every question × pipeline × repetition cell. Attempts are retained separately, and QueryRuns link to the exact cell/attempt before provider work starts.
+- Resume preserves successful cells, reconciles terminal QueryRuns after interrupted linking, and retries only configured infrastructure failure codes. Invalid answers and other research outcomes are not retries.
+- Completed experiment raw QueryRuns, retrieval/context, traces, artifacts, claims/citations, evaluations, and attributions have an ORM immutability backstop.
+- Results aggregation uses exact metric identity, explicit denominator policies, null-preserving missingness, infrastructure exclusion accounting, evidence survival, deterministic CSV, and versioned JSON.
+- The Results Dashboard provides the eight required views with sample sizes, filters, missing-value labels, and Query Laboratory drill-down.
+
+## High-priority Chunk 6 QA
+
+- Interrupt an experiment between QueryRun completion and attempt linking; resume must reconcile the existing `(experiment_run_id, experiment_attempt_number)` and create zero duplicate valid runs.
+- Try to mutate every research-affecting field after freeze. Expect `EXPERIMENT_VERSION_CONFLICT`; lifecycle/progress/cost fields may change only through the service.
+- Try to add/change/delete raw results after completion. Expect `EXPERIMENT_RAW_RESULTS_IMMUTABLE`; derived exports may be regenerated.
+- Recalculate dashboard aggregates from the exported run-level CSV/JSON. Numerators, denominators, missing counts, infrastructure exclusions, medians, and contributing run IDs must match.
+- Verify filters visibly change the sample population and never turn missing metrics or unknown cost into zero.
+- Verify a failed infrastructure attempt remains in attempt history while wrong answers, unsupported claims, and abstention errors are final research outcomes rather than retry triggers.
+- Confirm required evidence survival respects alternative acceptable evidence sets at retrieval, reranking, and context.
+- Search exports for configured secret values and sensitive keys. Values must be redacted and arbitrary artifact filesystem paths must be absent.
+- Verify all eight dashboard figures, keyboard navigation, accessible labels, small-sample cautions, and trace drill-down.
+
+## Chunk 6 known limitations and unverified areas
+
+- The current Job abstraction is persisted and queue-compatible but executes inline; no external worker/lease system exists.
+- PostgreSQL/pgvector execution is still unverified on this host because Docker and `psql` are unavailable. A dedicated `postgres-integration.yml` workflow and marked real-PostgreSQL test were added but were not executed locally.
+- Do not authorize a paid experiment from an incomplete cost estimate. Missing pricing intentionally leaves total cost unavailable and does not compare unknown values with the budget guard.
+
+# Chunk 7 — Final Research Audit and Reproducibility
+
+## Final preflight verdict
+
+**BLOCKED — do not run the paid pilot or main research experiment yet.**
+
+- Ten scientific PDFs are present only in the Git-ignored representative fixture directory. Their ingestion, parsing warnings, license/source metadata, indexes, READY/frozen corpus state, and content hash cannot be certified without the project PostgreSQL database.
+- No accessible frozen benchmark with at least 50 human-reviewed questions can be certified. Human ground truth must not be generated or inferred by Codex.
+- P0–P5 frozen conditions are not present in a reviewable export/database on this host.
+- Gemini generation and embedding adapters exist and share `RAGSCOPE_GEMINI_API_KEY`, but no paid smoke call was authorized or performed. The optional local CrossEncoder requires a pinned cached model revision and the reranker dependency.
+- Real generation/embedding pricing and `RAGSCOPE_EXPERIMENT_COST_LIMIT` are unset, so a complete paid estimate is unavailable.
+- The current working tree is not represented by the recorded Git HEAD. A clean commit is required before its hash can identify an experiment faithfully.
+- The latest independent Gemini result covers Chunks 1–5 only and remains conditional on real PostgreSQL, browser, migration, and provider checks.
+
+## Reproducibility assets to verify
+
+- From a clean checkout, follow `docs/REPRODUCIBILITY.md` to migrate, load fixtures, execute a deterministic fake-provider experiment, export results, and regenerate all eight SVG/JSON figures.
+- Confirm the figure manifest hashes the exact versioned analysis export and selector configuration; no manual numeric edits are permitted.
+- Confirm incomplete exports generate explicit placeholder figures instead of invented values.
+- Confirm methodology, threats-to-validity, report-input, research-report, and demo documents contain no unsupported result claims or unresolved identifiers presented as real data.
+
+## Highest-priority final Gemini QA
+
+- Record the final corpus ID/hash, parser/chunker/embedding/index snapshots, source/license metadata, and all parsing warnings.
+- Audit the frozen benchmark count and category distribution. Every answerable question needs a reviewed acceptable evidence set; every unanswerable question needs a reviewed explanation; leakage warnings need human disposition.
+- Compare P0–P5 snapshots field by field and confirm controlled generator, prompt, temperature, output limit, context budget, evaluation versions, and any intended differences.
+- Run the ≥5-question × ≥3-pipeline pilot with the same real providers intended for the main study. Inspect traces, rank preservation, evidence alignment, citations, metrics, cost, latency, and resume behavior.
+- Stop on any research-invalidating pilot defect, add a regression test, and rerun affected pilot cases before freezing the main experiment.
+- Reproduce every aggregate and figure from immutable exports, including denominators, exclusions, repetitions, retries, route distributions, and evidence survival.
+- Confirm case studies include both successful and harmful mechanisms and link to exact QueryRun/trace identifiers.
+- Run the real PostgreSQL workflow/CI, frontend critical flows, one explicitly authorized Gemini smoke test, secret scan, and documentation accuracy audit.
+
+## Chunk 7 items Codex could not independently verify
+
+- Final corpus selection and licenses.
+- Human review of at least 50 benchmark questions/evidence annotations.
+- Frozen P0–P5 research configurations.
+- Paid-provider behavior, current provider pricing, and experiment-budget authorization.
+- Pilot or main experiment results, exclusions, aggregate findings, ablations, qualitative cases, or demonstration recording.
+- Final independent Gemini QA after the repository is committed and the real PostgreSQL environment is available.
+
+# Completion follow-up — PostgreSQL worker, fixtures, and browser coverage
+
+This section supersedes older statements above that Docker/PostgreSQL, an external
+worker, or browser automation were unavailable. Those statements remain as the
+historical Gemini QA record.
+
+## Implemented closure work
+
+- Long ingestion, indexing, dataset extraction, evaluation, experiment execution,
+  export, analysis, and figure operations use typed PostgreSQL jobs. Workers claim
+  with `FOR UPDATE SKIP LOCKED`, retain attempts, heartbeat leases, reclaim expiry,
+  and honor cooperative cancellation/pause between safe units of work.
+- Default long-operation responses are `202` receipts. Explicit waits are bounded
+  to 1–60 seconds and production requests poll the worker instead of executing an
+  unbounded handler in the API process.
+- Artifact roots are absolute/configured; artifacts can link to experiments and
+  carry hashes, producer/configuration versions, media types, and safe identifiers.
+  Trace-export backfill and configured-secret scanning are explicit maintenance
+  commands.
+- Experiment analysis now computes headlines and all figure datasets over the full
+  filtered population, independently of paginated contributing-run rows. Every
+  applicable headline exposes denominator, missing, and excluded counts.
+- The shared source inspector resolves page/element/chunk URL focus and is reused by
+  trace, dataset, and benchmark evidence workflows.
+- The deterministic PostgreSQL fixture creates frozen P0–P5 conditions, five
+  reviewed questions, a 30-cell completed experiment, exports, and eight figures;
+  repeated execution reuses the same experiment identity.
+- Playwright covers source focus, pipeline freeze/query/trace/comparison, dataset
+  review, and full-population result drill-down. CI includes fresh PostgreSQL
+  migrations, pgvector/FTS tests, worker concurrency, fixture reproduction,
+  frontend checks, browser flows, and secret scanning.
+
+## Highest-priority independent follow-up
+
+- Re-run the complete CI workflow from a clean committed checkout and confirm zero
+  non-opt-in skips, including worker crash/lease recovery and duplicate-free resume.
+- Compare every persisted dashboard value with the run-level export under multiple
+  answerability, fixed/adaptive, failure-stage/category/code, status, question-type,
+  difficulty, pipeline, and infrastructure-inclusion filters.
+- Interrupt a worker during a real pilot matrix, wait for lease expiry, resume, and
+  confirm completed valid QueryRuns and raw artifacts are unchanged.
+- Resolve several citations/evidence selections from UI URL parameters to the exact
+  PDF page, element/chunk, and displayed passage.
+- Scan tracked files plus generated exports/artifacts for configured secret values;
+  the scanner must report identifiers only and must never print the secret.
+
+## Research gates still intentionally open
+
+- The candidate PDFs are not a final human-approved corpus and their source/license
+  metadata and parser warnings still require review.
+- The five-question fixture is not the required 75-question human benchmark.
+- No paid Gemini smoke, 45-run pilot, or 450-run main matrix has been authorized or
+  executed. Real current pricing, a cost limit, a clean commit, pinned local
+  CrossEncoder revision (if P4 uses it), and explicit budget approval are required.
+- Consequently no main-study rankings, hypothesis outcomes, qualitative cases, or
+  demonstration claims may be reported yet.
+
+## Completion verification — 2026-08-28
+
+- Docker Compose now builds the CPU-only API/worker image from a clean dependency
+  layer and runs healthy PostgreSQL/pgvector, API, worker, and production frontend
+  services. Alembic reports `b7d2f8a4c901 (head)` and no model/migration drift.
+- The PostgreSQL-backed suite passes 234 tests with no non-opt-in skips; this includes
+  pgvector similarity, PostgreSQL FTS, `SKIP LOCKED` worker concurrency, leases,
+  resume/idempotency, metrics, immutable artifacts, filters, exports, and figures.
+- The production frontend passes lint, TypeScript, build, and seven Playwright flows:
+  source focus/frozen evidence, pipeline/query/trace/comparison, dataset review,
+  full-population dashboard drill-down, experiment human-review navigation, full
+  corpus upload/parse/chunk/index/freeze, and reviewed unanswerable benchmark freeze.
+- Browser authoring exposed and regression-tested an async React form-lifecycle bug.
+  Corpus, benchmark, dataset, pipeline, and router forms now retain their form node
+  before awaiting the API, so successful mutations refresh without a null reset.
+- Human review queue labels are now contract-complete: correctness, completeness,
+  appropriate abstention, false-premise recognition, claim support, and citation
+  precision can all be stored as distinct `human-review.v1` observations.
+- Completed experiments continue to reject raw QueryRun/retrieval/context/trace/
+  claim/citation mutation. They permit append-only versioned derived evaluation and
+  narrowly scoped human override fields so the required post-run review is possible.
+- Repeated metric computation preserves every input-hashed row. Analysis selects the
+  newest stored input deterministically per metric identity, preventing duplicate
+  history from corrupting dashboard denominators.
+- The deterministic fixture reruns successfully, regenerates all eight JSON/SVG
+  figures plus run/aggregate/raw/adaptive exports, and the configured-value secret
+  scanner reports `secret_findings=0`.
+
+### Independent checks still recommended
+
+- From a clean commit, repeat CI and independently reproduce selected dashboard
+  denominators from the exported run-level CSV/JSON.
+- During the authorized real-provider pilot, interrupt one worker, allow its lease to
+  expire, resume, and confirm zero duplicate valid QueryRuns and preserved attempts.
+- Review exact PDF passage focus for multiple real documents and run one explicitly
+  authorized Gemini smoke request through P0–P5 before the paid 45-run pilot.

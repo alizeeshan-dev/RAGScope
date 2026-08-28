@@ -556,6 +556,15 @@ def test_benchmark_linked_run_evaluates_and_preserves_human_labels(
             reviewer_label="reviewed-correct",
         ),
     )
+    citation_review = service.add_human_metric(
+        run.id,
+        HumanMetricCreate(
+            metric_name="citation_precision",
+            metric_value=1.0,
+            reviewer_label="reviewed-citations",
+        ),
+    )
+    assert citation_review.metric_scope.value == "citation"
     service.evaluate(run.id)
 
     correctness = [
