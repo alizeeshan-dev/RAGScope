@@ -6,6 +6,7 @@ import { ResearchHeader } from "@/components/ResearchHeader";
 import { StatusBadge } from "@/components/StatusBadge";
 import { api } from "@/lib/api";
 import type { Chunk, DatasetCorrection, DatasetRecord, DocumentElement, FieldEvidence, FieldReviewAction, SourceDocument } from "@/lib/types";
+import styles from "../datasets.module.css";
 
 const FIELDS = [
   ["name", "Dataset name"], ["description", "Description"], ["domain", "Domain"], ["modalities", "Modalities"],
@@ -112,10 +113,10 @@ export default function DatasetRecordPage() {
     const anchor = document.createElement("a"); anchor.href = url; anchor.download = `dataset-record-${record.id}.json`; anchor.click(); URL.revokeObjectURL(url);
   }
 
-  if (!record) return <><ResearchHeader context="Dataset review" /><main id="main" className="shell"><p>{error || "Loading dataset record…"}</p></main></>;
+  if (!record) return <><ResearchHeader context="Dataset review" /><main id="main" className={`${styles.page} shell`}><div className={styles.loading} role={error ? "alert" : "status"}>{error || "Loading dataset record…"}</div></main></>;
 
   return (
-    <><ResearchHeader context="Dataset review" /><main id="main" className="shell intelligence-shell">
+    <><ResearchHeader context="Dataset review" /><main id="main" className={`${styles.page} shell intelligence-shell`}>
       <a className="back" href="/datasets">← Dataset catalog</a>
       <section className="page-title"><div><p className="eyebrow">Evidence-centric review</p><h1>{record.name ?? "Unnamed dataset"}</h1><p>Original model suggestions remain immutable. Every human action is recorded separately.</p></div><div className="action-bar"><StatusBadge status={record.review_status} /><button className="secondary" onClick={exportRecord}>Export JSON</button>{record.review_status !== "approved" ? <button disabled={Boolean(busy)} onClick={() => void updateRecordState("approve_record")}>Approve record</button> : <button className="secondary" disabled={Boolean(busy)} onClick={() => void updateRecordState("reopen_record")}>Reopen review</button>}</div></section>
       {error && <div className="alert" role="alert">{error}</div>}

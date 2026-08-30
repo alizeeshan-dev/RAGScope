@@ -11,9 +11,46 @@ export default function CorpusPage() {
   const { id } = useParams<{ id: string }>();
   const [corpus, setCorpus] = useState<Corpus | null>(null);
   const [error, setError] = useState("");
-  const load = useCallback(async () => { try { setCorpus(await api.getCorpus(id)); } catch (err) { setError(err instanceof Error ? err.message : "Load failed"); } }, [id]);
+  const load = useCallback(async () => {
+    try { setCorpus(await api.getCorpus(id)); setError(""); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Load failed"); }
+  }, [id]);
   useEffect(() => { void load(); }, [load]);
-  async function addVersion(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const formElement = event.currentTarget; const form = new FormData(formElement); const strategy=String(form.get("chunk_strategy")); try { await api.createVersion(id, { version_label: String(form.get("label")), parser_configuration: { parser_id: String(form.get("parser_id")), version: String(form.get("parser_version")) }, chunker_configuration: { strategy, target_tokens: Number(form.get("target_tokens")), overlap_tokens: Number(form.get("overlap_tokens")), include_section_titles: true, preserve_tables: strategy === "structure-aware", version: "1" }, embedding_configuration: { provider: String(form.get("embedding_provider")), model: String(form.get("embedding_model")), dimension: Number(form.get("embedding_dimension")), preprocessing_version: String(form.get("preprocessing_version")), task_type: "SEMANTIC_SIMILARITY" } }); formElement.reset(); await load(); } catch (err) { setError(err instanceof Error ? err.message : "Version creation failed"); } }
-  if (!corpus) return <main className="shell"><a href="/">← Corpora</a><p>{error || "Loading…"}</p></main>;
-  return <><header className="topbar"><a className="brand" href="/"><span className="brand-mark">R</span><div><strong>RAGScope</strong><small>Corpus Studio</small></div></a><span className="phase">Version control</span></header><main id="main" className="shell"><a className="back" href="/">← All corpora</a><section className="page-title"><div><p className="eyebrow">{corpus.domain || "Scientific corpus"}</p><h1>{corpus.name}</h1><p>{corpus.description || "No description supplied."}</p></div></section><section className="panel"><p className="eyebrow">Reproducible ingestion</p><h2>Create corpus version</h2><form className="runtime-form" onSubmit={addVersion}><div className="form-row"><label>Version label<input name="label" required placeholder="v1" /></label><label>Parser<select name="parser_id" defaultValue="docling-pdf"><option value="docling-pdf">Docling PDF</option><option value="markdown-parser">Markdown</option></select></label><label>Parser version<input name="parser_version" defaultValue="2" required/></label></div><div className="form-row"><label>Chunk strategy<select name="chunk_strategy" defaultValue="structure-aware"><option value="fixed">Fixed tokens</option><option value="structure-aware">Structure-aware</option></select></label><label>Target tokens<input name="target_tokens" type="number" min="1" defaultValue="384"/></label><label>Overlap tokens<input name="overlap_tokens" type="number" min="0" defaultValue="32"/></label></div><div className="form-row"><label>Embedding provider<select name="embedding_provider" defaultValue="fake"><option value="fake">Deterministic fake</option><option value="gemini">Gemini</option></select></label><label>Embedding model<input name="embedding_model" defaultValue="fake-hash-embedding-v1" required/></label><label>Dimension<input name="embedding_dimension" type="number" min="1" max="4096" defaultValue="64"/></label></div><label>Preprocessing version<input name="preprocessing_version" defaultValue="unicode-word-v1" required/></label><p className="field-note">Credentials remain backend environment values and are never included in this snapshot.</p><button>Create draft version</button></form></section>{error && <div role="alert" className="alert">{error}</div>}<section className="version-list">{(corpus.versions ?? []).map((version) => <a href={`/versions/${version.id}`} className="version-card" key={version.id}><div className="version-head"><div><span className="mono">{version.version_label}</span><StatusBadge status={version.status} /></div><span>{version.document_count} documents →</span></div><div className="config-grid"><ConfigSummary label="Parser" value={version.parser_configuration} /><ConfigSummary label="Chunker" value={version.chunker_configuration} /><ConfigSummary label="Embeddings" value={version.embedding_configuration} /></div><div className="version-foot"><span>Created {new Date(version.created_at).toLocaleString()}</span><code>{version.content_hash ? version.content_hash.slice(0, 16) + "…" : "Hash computed at freeze"}</code></div></a>)}{!corpus.versions?.length && <div className="empty"><strong>No versions</strong><span>Create the first draft to ingest documents.</span></div>}</section></main></>;
+
+  async function addVersion(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const strategy = String(form.get("chunk_strategy"));
+    try {
+      await api.createVersion(id, {
+        version_label: String(form.get("label")),
+        parser_configuration: { parser_id: String(form.get("parser_id")), version: String(form.get("parser_version")) },
+        chunker_configuration: { strategy, target_tokens: Number(form.get("target_tokens")), overlap_tokens: Number(form.get("overlap_tokens")), include_section_titles: true, preserve_tables: strategy === "structure-aware", version: "1" },
+        embedding_configuration: { provider: String(form.get("embedding_provider")), model: String(form.get("embedding_model")), dimension: Number(form.get("embedding_dimension")), preprocessing_version: String(form.get("preprocessing_version")), task_type: "SEMANTIC_SIMILARITY" },
+      });
+      formElement.reset();
+      await load();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Version creation failed"); }
+  }
+
+  if (!corpus) return <main className="shell"><a className="back" href="/corpora">← Corpora</a><p>{error || "Loading…"}</p></main>;
+  return <main id="main" className="shell">
+    <a className="back" href="/corpora">← All corpora</a>
+    <section className="page-title"><div><p className="eyebrow">{corpus.domain || "Scientific corpus"}</p><h1>{corpus.name}</h1><p>{corpus.description || "No description supplied."}</p></div></section>
+    <section className="panel"><p className="eyebrow">Reproducible ingestion</p><h2>Create corpus version</h2>
+      <form className="runtime-form" onSubmit={addVersion}>
+        <div className="form-row"><label>Version label<input name="label" required placeholder="v1" /></label><label>Parser<select name="parser_id" defaultValue="docling-pdf"><option value="docling-pdf">Docling PDF</option><option value="markdown-parser">Markdown</option></select></label><label>Parser version<input name="parser_version" defaultValue="2" required /></label></div>
+        <div className="form-row"><label>Chunk strategy<select name="chunk_strategy" defaultValue="structure-aware"><option value="fixed">Fixed tokens</option><option value="structure-aware">Structure-aware</option></select></label><label>Target tokens<input name="target_tokens" type="number" min="1" defaultValue="384" /></label><label>Overlap tokens<input name="overlap_tokens" type="number" min="0" defaultValue="32" /></label></div>
+        <div className="form-row"><label>Embedding provider<select name="embedding_provider" defaultValue="fake"><option value="fake">Deterministic fake</option><option value="gemini">Gemini</option></select></label><label>Embedding model<input name="embedding_model" defaultValue="fake-hash-embedding-v1" required /></label><label>Dimension<input name="embedding_dimension" type="number" min="1" max="4096" defaultValue="64" /></label></div>
+        <label>Preprocessing version<input name="preprocessing_version" defaultValue="unicode-word-v1" required /></label>
+        <p className="field-note">Credentials remain backend environment values and are never included in this snapshot.</p><button>Create draft version</button>
+      </form>
+    </section>
+    {error && <div role="alert" className="alert">{error}</div>}
+    <section className="version-list">
+      {(corpus.versions ?? []).map((version) => <a href={`/versions/${version.id}`} className="version-card" key={version.id}><div className="version-head"><div><span className="mono">{version.version_label}</span><StatusBadge status={version.status} /></div><span>{version.document_count} documents →</span></div><div className="config-grid"><ConfigSummary label="Parser" value={version.parser_configuration} /><ConfigSummary label="Chunker" value={version.chunker_configuration} /><ConfigSummary label="Embeddings" value={version.embedding_configuration} /></div><div className="version-foot"><span>Created {new Date(version.created_at).toLocaleString()}</span><code>{version.content_hash ? `${version.content_hash.slice(0, 16)}…` : "Hash computed at freeze"}</code></div></a>)}
+      {!corpus.versions?.length && <div className="empty"><strong>No versions</strong><span>Create the first draft to ingest documents.</span></div>}
+    </section>
+  </main>;
 }

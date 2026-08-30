@@ -598,3 +598,67 @@ historical Gemini QA record.
   expire, resume, and confirm zero duplicate valid QueryRuns and preserved attempts.
 - Review exact PDF passage focus for multiple real documents and run one explicitly
   authorized Gemini smoke request through P0–P5 before the paid 45-run pilot.
+
+# Frontend redesign v2 — independent QA checklist
+
+The Figma redesign uses one floating top navigation across Overview, Corpus Studio,
+Query Laboratory, Pipeline Comparison, Dataset Intelligence, Benchmark Authoring,
+Experiment Manager, and Pipeline Builder. The redesign intentionally reuses the
+existing backend contracts; it does not introduce a parallel data or mock layer.
+
+## Visual and navigation checks
+
+- Compare all eight landing screens against Figma file
+  `tZwxwNHJAHdnxMpEOCq0Ji`, frames `2:9`, `2:95`, `2:177`, `2:282`, `2:370`,
+  `2:467`, `2:554`, and `2:648` at 1440px and responsive widths.
+- Confirm the cream canvas, dark-green floating navigation, serif display hierarchy,
+  card borders/radii, compact research forms, and evidence-oriented visual hierarchy
+  remain consistent. The old left/sidebar or duplicated page header must never return.
+- Keyboard-test all eight navigation links, visible focus, horizontal navigation at
+  narrow widths, skip-to-content, form labels, status text, tables, and error states.
+- Confirm `/` is the live Overview and `/corpora` is Corpus Studio; corpus, version,
+  and document detail routes remain reachable from the new navigation and cards.
+
+## Live integration checks
+
+- Overview counts must come from stored corpora, indexes, frozen pipelines,
+  experiments, benchmarks, and full-population analysis. Missing evidence/pricing
+  values must display unavailable, never a fabricated zero.
+- Corpus Studio must create a real corpus and preserve version creation, upload,
+  parse, fixed/structure-aware chunking, indexing, freeze, and Document Inspector.
+- Query Laboratory must execute a real frozen pipeline and retain stage order,
+  rank history, context exclusions, exact-context artifact, generation metadata,
+  evaluation, failure attribution, human labels, and citation/source drill-down.
+- Pipeline Comparison must enforce one corpus/question and 2–4 frozen pipelines;
+  stored comparison URLs, configuration differences, evidence overlap, failed
+  columns, rank movement, and QueryRun links must remain functional.
+- Dataset Intelligence must use live extraction/catalog/filter/comparison endpoints;
+  verify original model output, field evidence, not-stated state, corrections, human
+  approval rules, history, export, and exact source focus.
+- Benchmark Authoring must preserve draft editing, stable evidence selection,
+  alternative evidence sets, leakage warnings, unanswerable explanations, human
+  annotation state, freeze immutability, and read-only frozen detail screens.
+- Experiment Manager must preserve dependency selection, cost estimate, freeze,
+  start/pause/resume, progress, review queue, immutable export generation, dashboard
+  filters, all eight full-population figures, denominators, and trace drill-down.
+- Pipeline Builder must preserve fixed/adaptive pipeline and router creation/freeze,
+  complete retrieval/fusion/reranker/context/generation settings, safe provider
+  capability reporting, and the persisted smoke-query path. Credentials must never
+  appear in browser payloads or snapshots.
+
+## States, regression, and security
+
+- Exercise loading, empty, validation, success, partial-failure, infrastructure
+  failure, and backend-unavailable states on every landing page. No screen should
+  crash because a list is empty or an optional metric/cost is null.
+- Verify PDF/source links retain `page`, `element`, and `chunk` focus and highlight
+  the exact provenance-backed passage from datasets, benchmarks, claims, context,
+  retrieval, and comparison views.
+- Confirm charts and overview summaries do not derive research claims from paginated
+  UI rows. Sample sizes and denominator changes must stay explicit.
+- Inspect browser requests, rendered DOM, client errors, traces, and downloaded
+  exports for API keys, authorization headers, cookies, database URLs, provider
+  errors, prompts, or unsafe artifact paths.
+- Repeat production Docker Compose health, frontend lint/type/build, the Playwright
+  critical flows, API health, and selected backend regression tests after the final
+  independent visual review.

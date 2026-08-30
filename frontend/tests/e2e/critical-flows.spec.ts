@@ -27,6 +27,12 @@ async function fixture(request: APIRequestContext) {
 test("fixture corpus, source focus, and frozen benchmark are inspectable", async ({ page, request }) => {
   const data = await fixture(request);
   await page.goto("/");
+  await expect(page.getByRole("heading", { name: "RAG research, made inspectable." })).toBeVisible();
+  const primary = page.getByRole("navigation", { name: "Primary navigation" });
+  await expect(primary.getByRole("link")).toHaveCount(8);
+  await primary.getByRole("link", { name: "Corpora" }).click();
+  await expect(page).toHaveURL(/\/corpora$/);
+  await page.goto("/corpora");
   await expect(page.getByRole("heading", { name: "Scientific corpora" })).toBeVisible();
   await expect(page.getByText(data.corpus.name)).toBeVisible();
 
@@ -122,7 +128,7 @@ test("dashboard uses complete server-side populations and drills into runs", asy
 test("human review queue preserves labels separately and supports run navigation", async ({ page, request }) => {
   const data = await fixture(request);
   await page.goto(`/experiments/${data.experiment.id}/review`);
-  await expect(page.getByRole("heading", { name: "Runs missing required human labels" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Runs missing required labels" })).toBeVisible();
   const reviewLink = page.getByRole("link", { name: "Inspect evidence and label →" }).first();
   await expect(reviewLink).toBeVisible();
   await reviewLink.click();
@@ -149,11 +155,11 @@ test("corpus authoring uploads, parses, chunks, indexes, and freezes a source sn
   const versionLabel = `e2e-${nonce}`;
   const sourceTitle = `Playwright Atlas ${nonce}`;
 
-  await page.goto("/");
-  await page.getByLabel("Name").fill(corpusName);
-  await page.getByLabel("Domain").fill("Synthetic browser verification");
-  await page.getByLabel("Description").fill("Disposable local corpus used to verify the full authoring contract.");
-  await page.getByRole("button", { name: "Create corpus" }).click();
+  await page.goto("/corpora");
+  await page.getByLabel("Corpus name").fill(corpusName);
+  await page.getByLabel("Research domain").fill("Synthetic browser verification");
+  await page.getByLabel("Scope and inclusion criteria").fill("Disposable local corpus used to verify the full authoring contract.");
+  await page.getByRole("button", { name: "Create collection" }).click();
   await page.getByRole("link", { name: new RegExp(corpusName) }).click();
 
   await page.getByLabel("Version label").fill(versionLabel);
@@ -196,7 +202,7 @@ test("human-authored unanswerable benchmark freezes without fabricated evidence"
     "Disposable human-ground-truth workflow verification.",
   );
   await page.getByRole("button", { name: "Create benchmark" }).click();
-  await page.getByLabel("Benchmark").selectOption({ label: benchmarkName });
+  await page.locator('select[name="benchmark_id"]').selectOption({ label: benchmarkName });
   await page.getByLabel("Corpus version").selectOption(data.version.id);
   await page.getByLabel("Notes").fill("Synthetic Playwright annotation only.");
   await page.getByRole("button", { name: "Create draft version" }).click();

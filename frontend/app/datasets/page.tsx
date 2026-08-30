@@ -3,8 +3,9 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ResearchHeader } from "@/components/ResearchHeader";
 import { StatusBadge } from "@/components/StatusBadge";
-import { api } from "@/lib/api";
-import type { DatasetRecord } from "@/lib/types";
+import { api, isOperationAccepted } from "@/lib/api";
+import type { BackgroundJob, DatasetRecord } from "@/lib/types";
+import styles from "./datasets.module.css";
 
 function listItems(value: Awaited<ReturnType<typeof api.listDatasetRecords>>): DatasetRecord[] {
   return Array.isArray(value) ? value : value.items;
@@ -27,18 +28,47 @@ export default function DatasetCatalogPage() {
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [extractionJobId, setExtractionJobId] = useState("");
+  const [extractionJob, setExtractionJob] = useState<BackgroundJob | null>(null);
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
       setRecords(listItems(await api.listDatasetRecords(filters)));
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Dataset catalog could not be loaded");
-    }
+    } finally { setLoading(false); }
   }, [filters]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { setExtractDocumentId(new URLSearchParams(window.location.search).get("document") ?? ""); }, []);
+  useEffect(() => {
+    if (!extractionJobId) return;
+    let active = true;
+    const poll = async () => {
+      try {
+        const next = await api.getJob(extractionJobId);
+        if (!active) return;
+        setExtractionJob(next);
+        if (["succeeded", "failed", "cancelled"].includes(next.status)) {
+          window.clearInterval(timer);
+          if (next.status === "succeeded") {
+            setMessage(`Dataset extraction ${next.id} completed. Validated records are now shown in the catalog.`);
+            await load();
+          } else {
+            setError(next.error_message ?? `Dataset extraction ${next.status}.`);
+          }
+        }
+      } catch (reason) {
+        if (active) setError(reason instanceof Error ? reason.message : "Extraction status could not be refreshed");
+      }
+    };
+    const timer = window.setInterval(() => void poll(), 2000);
+    void poll();
+    return () => { active = false; window.clearInterval(timer); };
+  }, [extractionJobId, load]);
 
   const facets = useMemo(() => ({
     domains: [...new Set(records.map((item) => item.domain).filter(Boolean))] as string[],
@@ -46,6 +76,12 @@ export default function DatasetCatalogPage() {
     tasks: [...new Set(records.flatMap((item) => item.task_types ?? []))],
     languages: [...new Set(records.flatMap((item) => item.languages ?? []))],
     licenses: [...new Set(records.map((item) => item.license).filter(Boolean))] as string[],
+  }), [records]);
+
+  const summary = useMemo(() => ({
+    approved: records.filter((record) => record.review_status === "approved").length,
+    inReview: records.filter((record) => record.review_status === "in_review").length,
+    evidence: records.reduce((count, record) => count + (record.field_evidence ?? record.evidence ?? []).length, 0),
   }), [records]);
 
   async function extract(event: FormEvent<HTMLFormElement>) {
@@ -61,7 +97,14 @@ export default function DatasetCatalogPage() {
         ...(model ? { model } : {}),
       });
       const jobId = "job_id" in job ? job.job_id : job.id;
-      setMessage(`Extraction job ${jobId} is ${job.status}. The catalog will show validated records when processing finishes.`);
+      if (!jobId) throw new Error("The extraction operation did not return a job identifier.");
+      setExtractionJobId(jobId);
+      setExtractionJob(null);
+      if (isOperationAccepted(job)) setMessage(`Dataset extraction ${jobId} was accepted. This page will refresh when the worker finishes.`);
+      else {
+        setMessage(`Dataset extraction ${jobId} is ${job.status}.`);
+        if (job.status === "succeeded") await load();
+      }
       form.reset(); setExtractDocumentId("");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Extraction could not be started"); }
     finally { setBusy(""); }
@@ -71,10 +114,12 @@ export default function DatasetCatalogPage() {
     setSelected((current) => checked ? [...current, id].slice(-4) : current.filter((item) => item !== id));
   }
 
+  const extractionActive = Boolean(extractionJobId) && !["succeeded", "failed", "cancelled"].includes(extractionJob?.status ?? "queued");
+
   return (
     <>
       <ResearchHeader context="Dataset intelligence" />
-      <main id="main" className="shell intelligence-shell">
+      <main id="main" className={`${styles.page} shell intelligence-shell`} aria-busy={loading}>
         <section className="page-title">
           <div><p className="eyebrow">Human-reviewed catalog</p><h1>Dataset intelligence</h1><p>Extract structured dataset facts, inspect field-level provenance, and keep model suggestions separate from human ground truth.</p></div>
           <div className="action-bar">
@@ -83,7 +128,13 @@ export default function DatasetCatalogPage() {
           </div>
         </section>
         {error && <div className="alert" role="alert">{error}</div>}
-        {message && <div className="success-callout" role="status">{message}</div>}
+        {message && <div className="success-callout" role="status" aria-live="polite"><strong>{message}</strong>{extractionJob && <span>{extractionJob.status} · {extractionJob.progress_current}/{extractionJob.progress_total ?? "?"}</span>}{extractionActive && <span>You may navigate elsewhere; the PostgreSQL worker continues independently.</span>}</div>}
+        <section className={styles.stats} aria-label="Dataset catalog summary">
+          <div className={styles.stat}><span>Visible records</span><strong>{loading ? "—" : records.length}</strong></div>
+          <div className={styles.stat}><span>Approved</span><strong>{loading ? "—" : summary.approved}</strong></div>
+          <div className={styles.stat}><span>In review</span><strong>{loading ? "—" : summary.inReview}</strong></div>
+          <div className={styles.stat}><span>Evidence links</span><strong>{loading ? "—" : summary.evidence}</strong></div>
+        </section>
         <div className="intelligence-layout">
           <aside className="panel filter-panel">
             <p className="eyebrow">Structured filters</p><h2>Find records</h2>
@@ -101,13 +152,13 @@ export default function DatasetCatalogPage() {
               <label>Strategy<select name="strategy"><option value="baseline">Whole document baseline</option><option value="retrieval_assisted">Retrieval-assisted</option></select></label>
               <label>Generation provider<select name="provider"><option value="fake">Deterministic fake</option><option value="gemini">Gemini (environment key)</option><option value="openai_compatible">OpenAI-compatible</option></select></label>
               <label>Model (optional)<input name="model" placeholder="gemini-2.5-flash" /></label>
-              <button disabled={Boolean(busy)}>{busy ? "Starting…" : "Start extraction"}</button>
+              <button disabled={Boolean(busy) || extractionActive}>{busy ? "Starting…" : extractionActive ? "Extraction in progress…" : "Start extraction"}</button>
               <small className="muted">Uploaded documents are untrusted evidence, never instructions.</small>
             </form>
           </aside>
           <section className="panel">
             <div className="panel-heading"><div><p className="eyebrow">Catalog</p><h2>{records.length} records</h2></div><span>Select 2–4 to compare</span></div>
-            {records.length === 0 ? <div className="empty"><strong>No matching dataset records</strong><span>Run extraction from a parsed document or change the filters.</span></div> : <div className="dataset-card-list">{records.map((record) => (
+            {loading ? <div className={styles.loading} role="status">Loading reviewed dataset records…</div> : records.length === 0 ? <div className="empty"><strong>No matching dataset records</strong><span>Run extraction from a parsed document or change the filters.</span></div> : <div className="dataset-card-list">{records.map((record) => (
               <article className="dataset-card" key={record.id}>
                 <label className="compare-check"><input type="checkbox" checked={selected.includes(record.id)} disabled={!selected.includes(record.id) && selected.length === 4} onChange={(event) => choose(record.id, event.target.checked)} /> Compare</label>
                 <a href={`/datasets/${record.id}`}><div className="dataset-card-title"><div><h3>{record.name ?? <em>Not stated</em>}</h3><p>{record.description ?? "No description stated in the source."}</p></div><StatusBadge status={record.review_status} /></div>

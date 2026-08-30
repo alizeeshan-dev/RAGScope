@@ -24,6 +24,7 @@ export default function ComparisonsPage() {
   const [comparison, setComparison] = useState<QueryComparison | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const comparisonId = new URLSearchParams(window.location.search).get("comparison");
@@ -33,7 +34,8 @@ export default function ComparisonsPage() {
         setPipelines(nextPipelines);
         setComparison(storedComparison);
       })
-      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not load comparison controls"));
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not load comparison controls"))
+      .finally(() => setLoading(false));
   }, []);
 
   async function runComparison(event: FormEvent<HTMLFormElement>) {
@@ -70,22 +72,15 @@ export default function ComparisonsPage() {
   const frozenPipelines = pipelines.filter((pipeline) => pipeline.frozen_at !== null);
 
   return (
-    <>
-      <header className="topbar">
-        <a className="brand" href="/"><span className="brand-mark">R</span><div><strong>RAGScope</strong><small>Pipeline Comparison</small></div></a>
-        <nav className="top-nav" aria-label="Research tools"><a href="/laboratory">Query Laboratory</a><span className="phase">Same question · same corpus</span></nav>
-      </header>
-      <main id="main" className="shell">
-        <a className="back" href="/">← Corpora</a>
-        <section className={styles.hero}><p className="eyebrow">Pipeline Comparison</p><h1>Compare observable outcomes, not a universal winner.</h1><p className="muted">Run two to four frozen configurations against one exact question and corpus version. Evidence, ranks, context, answers, failures, latency, and cost stay aligned.</p></section>
+      <main id="main" className={`${styles.shell} shell`}>
+        <section className={styles.hero}><div><p className="eyebrow">Pipeline Comparison</p><h1>Same question.<br />Different pipelines.</h1><p>Run two to four frozen configurations against one exact question and corpus version. Compare evidence, ranking, context, answers, latency, and cost without declaring a universal winner.</p></div><div className={styles.principle}><span>Controlled comparison</span><strong>1 corpus · 1 question · 2–4 pipelines</strong></div></section>
         {error && <div className="alert" role="alert">{error}</div>}
-        <section className={`panel ${styles.launcher}`} aria-labelledby="compare-heading">
-          <div><p className="eyebrow">Controlled execution</p><h2 id="compare-heading">New comparison</h2><p className="muted">Each column remains a complete, independently inspectable QueryRun.</p></div>
+        <section className={styles.launcher} aria-labelledby="compare-heading">
+          <div className={styles.launcherHeading}><div><p className="eyebrow">Controlled execution</p><h2 id="compare-heading">Build a comparison</h2></div><p>Each result remains a complete, independently inspectable QueryRun.</p></div>
           <form className={styles.form} onSubmit={runComparison}>
-            <label>Ready corpus version<select name="corpus_version_id" required defaultValue=""><option value="" disabled>Select corpus version</option>{readyVersions.map((version) => <option key={version.id} value={version.id}>{version.corpusName} · {version.version_label}</option>)}</select></label>
-            <fieldset><legend>Frozen pipelines (select 2–4)</legend><div className={styles.checks}>{frozenPipelines.map((pipeline) => <label className={styles.check} key={pipeline.id}><input type="checkbox" checked={selected.includes(pipeline.id)} disabled={!selected.includes(pipeline.id) && selected.length === 4} onChange={(event) => setSelected((current) => event.target.checked ? [...current, pipeline.id] : current.filter((id) => id !== pipeline.id))} /><span>{pipeline.name} v{pipeline.version}<small>{pipeline.retrieval_mode} · {show(pipeline.generation_configuration.model)}</small></span></label>)}</div></fieldset>
-            <label>Exact shared question<textarea name="question" rows={5} maxLength={10000} required /></label>
-            <button disabled={busy || selected.length < 2}>{busy ? "Running pipelines…" : `Compare ${selected.length || "selected"} pipelines`}</button>
+            <div className={styles.inputs}><label>Ready corpus version<select name="corpus_version_id" required defaultValue="" disabled={loading}><option value="" disabled>{loading ? "Loading corpus versions…" : "Select corpus version"}</option>{readyVersions.map((version) => <option key={version.id} value={version.id}>{version.corpusName} · {version.version_label}</option>)}</select></label><label>Exact shared question<textarea name="question" rows={3} maxLength={10000} required placeholder="Enter the question every pipeline should answer…" /></label></div>
+            <fieldset><legend>Frozen pipelines <span>{selected.length}/4 selected</span></legend>{loading ? <p className="muted">Loading frozen configurations…</p> : frozenPipelines.length === 0 ? <p className={styles.empty}>No frozen pipelines are available. <a href="/runtime">Open Pipeline Builder</a> to create and freeze one.</p> : <div className={styles.checks}>{frozenPipelines.map((pipeline) => <label className={styles.check} key={pipeline.id}><input type="checkbox" checked={selected.includes(pipeline.id)} disabled={!selected.includes(pipeline.id) && selected.length === 4} onChange={(event) => setSelected((current) => event.target.checked ? [...current, pipeline.id] : current.filter((id) => id !== pipeline.id))} /><span><strong>{pipeline.name} v{pipeline.version}</strong><small>{pipeline.retrieval_mode} · {show(pipeline.generation_configuration.model)}</small></span></label>)}</div>}</fieldset>
+            <div className={styles.submitRow}><p>Results align on evidence identity and preserve every pipeline&apos;s original ranks.</p><button disabled={busy || loading || selected.length < 2}>{busy ? "Running pipelines…" : `Compare ${selected.length || "selected"} pipelines`}<span aria-hidden="true">→</span></button></div>
           </form>
         </section>
 
@@ -109,6 +104,5 @@ export default function ComparisonsPage() {
           </article>)}</div></section>
         </>}
       </main>
-    </>
   );
 }

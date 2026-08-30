@@ -16,20 +16,26 @@ export default function ExperimentManagerPage() {
   const [pipelines, setPipelines] = useState<PipelineConfiguration[]>([]);
   const [selectedPipelines, setSelectedPipelines] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
       const [nextExperiments, nextCorpora, nextBenchmarks, nextPipelines] = await Promise.all([
         api.listExperiments(), api.listCorpora(), api.listBenchmarks(), api.listPipelines(),
       ]);
-      const versions = (await Promise.all(nextBenchmarks.map((benchmark) => api.listBenchmarkVersions(benchmark.id)))).flat();
-      setExperiments(nextExperiments); setCorpora(nextCorpora); setBenchmarks(nextBenchmarks); setBenchmarkVersions(versions); setPipelines(nextPipelines); setError("");
+      const [versions, experimentDetails] = await Promise.all([
+        Promise.all(nextBenchmarks.map((benchmark) => api.listBenchmarkVersions(benchmark.id))).then((items) => items.flat()),
+        Promise.all(nextExperiments.map((experiment) => api.getExperiment(experiment.id).catch(() => experiment))),
+      ]);
+      setExperiments(experimentDetails); setCorpora(nextCorpora); setBenchmarks(nextBenchmarks); setBenchmarkVersions(versions); setPipelines(nextPipelines); setError("");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load experiments"); }
+    finally { setLoading(false); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  const readyVersions = useMemo(() => corpora.flatMap((corpus) => (corpus.versions ?? []).filter((version) => version.status === "ready").map((version) => ({ ...version, corpusName: corpus.name }))), [corpora]);
+  const readyVersions = useMemo(() => corpora.flatMap((corpus) => (corpus.versions ?? []).filter((version) => version.status === "ready" && version.frozen_at !== null).map((version) => ({ ...version, corpusName: corpus.name }))), [corpora]);
   const frozenBenchmarks = benchmarkVersions.filter((version) => version.status === "frozen");
   const frozenPipelines = pipelines.filter((pipeline) => pipeline.frozen_at !== null);
   const benchmarkName = (version: BenchmarkVersion) => benchmarks.find((benchmark) => benchmark.id === version.benchmark_id)?.name ?? "Benchmark";
@@ -47,9 +53,33 @@ export default function ExperimentManagerPage() {
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Experiment could not be created"); setBusy(false); }
   }
 
-  return <><header className="topbar"><a className="brand" href="/"><span className="brand-mark">R</span><div><strong>RAGScope</strong><small>Experiment Manager</small></div></a><nav className="top-nav" aria-label="Research tools"><a href="/laboratory">Query Laboratory</a><a href="/benchmarks">Benchmarks</a><span className="phase">Controlled execution</span></nav></header>
-    <main id="main" className="shell intelligence-shell"><a className="back" href="/">← Corpora</a><section className={styles.hero}><div><p className="eyebrow">Experiment Manager</p><h1>Freeze the method, then execute the matrix.</h1><p className="muted">Every question × pipeline × repetition becomes an independent QueryRun. Completed valid cells are reused when an interrupted experiment resumes.</p></div></section>{error && <div className="alert" role="alert">{error}</div>}
-      <div className={styles.layout}><form className={`panel ${styles.form}`} onSubmit={create}><div><p className="eyebrow">New draft</p><h2>Configure experiment</h2><p className="muted">Only immutable corpus, benchmark, and pipeline dependencies are offered.</p></div><label>Name<input name="name" required maxLength={200} /></label><label>Research question<textarea name="research_question" required rows={4} maxLength={2000} /></label><label>Ready corpus version<select name="corpus_version_id" required defaultValue=""><option value="" disabled>Select corpus</option>{readyVersions.map((version)=><option value={version.id} key={version.id}>{version.corpusName} · {version.version_label}</option>)}</select></label><label>Frozen benchmark version<select name="benchmark_version_id" required defaultValue=""><option value="" disabled>Select benchmark</option>{frozenBenchmarks.map((version)=><option value={version.id} key={version.id}>{benchmarkName(version)} · v{version.version}</option>)}</select></label><fieldset><legend>Frozen pipelines (at least 2)</legend><div className={styles.pipelineChecks}>{frozenPipelines.map((pipeline)=><label key={pipeline.id}><input type="checkbox" checked={selectedPipelines.includes(pipeline.id)} onChange={(event)=>setSelectedPipelines((current)=>event.target.checked?[...current,pipeline.id]:current.filter((id)=>id!==pipeline.id))}/><span>{pipeline.name} v{pipeline.version}<small>{pipeline.execution_mode} · {pipeline.retrieval_mode}</small></span></label>)}</div></fieldset><div className="form-row"><label>Repetitions<input name="repetitions" type="number" min="1" max="20" defaultValue="1" required /></label><label>Code commit<input name="code_commit" minLength={7} maxLength={100} required placeholder="git commit SHA" /></label></div><label className="inline-check"><input name="stop_on_error" type="checkbox"/> Stop matrix on the first terminal failure</label><button disabled={busy || selectedPipelines.length < 2}>{busy ? "Creating draft…" : "Create draft experiment"}</button></form>
-        <section className="panel" aria-labelledby="experiment-list"><div className="panel-heading"><div><p className="eyebrow">Registry</p><h2 id="experiment-list">Experiments</h2></div><span className="muted">{experiments.length} total</span></div><div className={styles.list}>{experiments.length===0?<div className="empty"><strong>No experiments yet</strong><span>Create a small pilot after freezing benchmark and pipeline versions.</span></div>:experiments.map((experiment)=>{const progress=experiment.progress; const complete=(progress?.succeeded??0)+(progress?.failed??0); const percent=progress?.total?Math.round(complete/progress.total*100):0; return <a className={styles.card} href={`/experiments/${experiment.id}`} key={experiment.id}><div><div className="panel-heading"><h2>{experiment.name}</h2><StatusBadge status={experiment.status}/></div><p>{experiment.research_question}</p><div className={styles.facts}><span>{experiment.pipeline_configuration_ids.length} pipelines</span><span>{experiment.repetitions} repetition{experiment.repetitions===1?"":"s"}</span><span>{progress?.total??"Matrix not frozen"} planned runs</span><span>Created {new Date(experiment.created_at).toLocaleDateString()}</span></div></div><div className={styles.progress}><strong>{percent}%</strong><progress max="100" value={percent}>{percent}%</progress><small>{complete}/{progress?.total??0} complete</small></div></a>;})}</div></section></div>
-    </main></>;
+  const runningCount = experiments.filter((item) => item.status === "running").length;
+  const completedCount = experiments.filter((item) => item.status === "completed" || item.status === "completed_with_failures").length;
+  const plannedRuns = experiments.reduce((sum, item) => sum + (item.progress?.total ?? 0), 0);
+  const completedRuns = experiments.reduce((sum, item) => sum + (item.progress?.succeeded ?? 0) + (item.progress?.failed ?? 0), 0);
+
+  return <main id="main" className={`shell ${styles.page}`}>
+    <section className={styles.hero}>
+      <div><p className="eyebrow">Controlled research</p><h1>Experiment manager</h1><p>Freeze conditions, estimate cost, execute reproducibly, and drill into every run.</p></div>
+    </section>
+    {error && <div className="alert" role="alert">{error}</div>}
+    <div className={styles.layout}>
+      <form className={`panel ${styles.form}`} onSubmit={create}>
+        <div className={styles.formIntro}><h2>Configure experiment</h2><p>Only immutable research dependencies are eligible.</p></div>
+        <label>Name<input name="name" required maxLength={200} placeholder="Adaptive RAG benchmark" /></label>
+        <label>Research question<textarea name="research_question" required rows={3} maxLength={2000} placeholder="Can adaptive routing reduce cost without quality loss?" /></label>
+        <label>Corpus<select name="corpus_version_id" required defaultValue=""><option value="" disabled>Select a ready corpus</option>{readyVersions.map((version)=><option value={version.id} key={version.id}>{version.corpusName} · {version.version_label} · Ready</option>)}</select></label>
+        <label>Benchmark<select name="benchmark_version_id" required defaultValue=""><option value="" disabled>Select a frozen benchmark</option>{frozenBenchmarks.map((version)=><option value={version.id} key={version.id}>{benchmarkName(version)} · v{version.version} · Frozen</option>)}</select></label>
+        <div className="form-row"><label>Repetitions<input name="repetitions" type="number" min="1" max="20" defaultValue="1" required /></label><label>Code commit<input name="code_commit" minLength={7} maxLength={100} required placeholder="git commit SHA" /></label></div>
+        <fieldset><legend>Frozen pipelines (select at least 2)</legend><div className={styles.pipelineChecks}>{frozenPipelines.length === 0 ? <div className="empty"><strong>No frozen pipelines</strong><span>Freeze study conditions in Pipeline Builder first.</span></div> : frozenPipelines.map((pipeline)=><label key={pipeline.id}><input type="checkbox" checked={selectedPipelines.includes(pipeline.id)} onChange={(event)=>setSelectedPipelines((current)=>event.target.checked?[...current,pipeline.id]:current.filter((id)=>id!==pipeline.id))}/><span>{pipeline.name} v{pipeline.version}<small>{pipeline.execution_mode} · {pipeline.retrieval_mode}</small></span></label>)}</div></fieldset>
+        <label className="inline-check"><input name="stop_on_error" type="checkbox"/> Pause the matrix on the first terminal failure</label>
+        <div className={styles.formActions}><span className={styles.estimateHint}>Estimate cost after draft creation</span><button disabled={busy || selectedPipelines.length < 2}>{busy ? "Creating…" : "Create draft"}</button></div>
+      </form>
+      <section className={`panel ${styles.registry}`} aria-labelledby="experiment-list">
+        <div className={styles.registryHeader}><div><h2 id="experiment-list">Experiment registry</h2><p>{experiments.length} experiment{experiments.length === 1 ? "" : "s"}</p></div><span className="muted">Immutable run matrices</span></div>
+        <div className={styles.list}>{loading?<div className="design-loading" role="status">Loading experiment registry…</div>:experiments.length===0?<div className="empty"><strong>No experiments yet</strong><span>Create a small pilot after freezing corpus, benchmark, and pipeline versions.</span></div>:experiments.map((experiment)=>{const progress=experiment.progress; const complete=(progress?.succeeded??0)+(progress?.failed??0); const percent=progress?.total?Math.round(complete/progress.total*100):0; return <a className={styles.card} data-active={experiment.status === "running"} href={`/experiments/${experiment.id}`} key={experiment.id}><div><div className="panel-heading"><h2>{experiment.name}</h2><StatusBadge status={experiment.status}/></div><p>{experiment.research_question}</p><div className={styles.facts}><span>{experiment.pipeline_configuration_ids.length} pipelines</span><span>{experiment.repetitions} repetition{experiment.repetitions===1?"":"s"}</span><span>{progress?.total??"Matrix not frozen"} planned runs</span><span>{new Date(experiment.created_at).toLocaleDateString()}</span></div></div><div className={styles.progress}><strong>{percent}%</strong><progress max="100" value={percent}>{percent}%</progress><small>{complete}/{progress?.total??0} complete</small></div></a>;})}</div>
+        <div className={styles.researchSummary} aria-label="Live experiment summary"><div><span>Running</span><strong>{runningCount}</strong></div><div><span>Completed</span><strong>{completedCount}</strong></div><div><span>Completed runs</span><strong>{completedRuns}</strong></div><div><span>Planned runs</span><strong>{plannedRuns || "—"}</strong></div></div>
+      </section>
+    </div>
+  </main>;
 }

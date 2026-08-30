@@ -112,6 +112,13 @@ export interface PipelineConfiguration {
   frozen_at: string | null;
 }
 
+export interface ProviderCapability {
+  provider: string;
+  capability: string;
+  available: boolean;
+  reason: string;
+}
+
 export interface QueryRun {
   id: string;
   corpus_version_id: string;

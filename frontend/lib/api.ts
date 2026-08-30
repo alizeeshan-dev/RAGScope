@@ -1,4 +1,4 @@
-import type { Artifact, BackgroundJob, Benchmark, BenchmarkEvidence, BenchmarkQuestion, BenchmarkVersion, Chunk, Corpus, CorpusVersion, DatasetComparison, DatasetRecord, DatasetRecordList, DocumentElement, EvaluationBundle, Experiment, ExperimentCostEstimate, ExperimentDetail, ExperimentExecutionReport, ExperimentResultRow, ExperimentResults, ExperimentResultsFilters, ExperimentResultsResponse, ExtractionJob, FailureAttribution, FieldEvidence, FieldReviewAction, HumanReviewQueuePage, IndexStatus, ObservableTraceExport, OperationAccepted, PipelineConfiguration, QueryComparison, QueryRun, RouterConfiguration, RunClaim, RunContextSource, RunRetrievalResult, SourceDocument } from "./types";
+import type { Artifact, BackgroundJob, Benchmark, BenchmarkEvidence, BenchmarkQuestion, BenchmarkVersion, Chunk, Corpus, CorpusVersion, DatasetComparison, DatasetRecord, DatasetRecordList, DocumentElement, EvaluationBundle, Experiment, ExperimentCostEstimate, ExperimentDetail, ExperimentExecutionReport, ExperimentResultRow, ExperimentResults, ExperimentResultsFilters, ExperimentResultsResponse, ExtractionJob, FailureAttribution, FieldEvidence, FieldReviewAction, HumanReviewQueuePage, IndexStatus, ObservableTraceExport, OperationAccepted, PipelineConfiguration, ProviderCapability, QueryComparison, QueryRun, RouterConfiguration, RunClaim, RunContextSource, RunRetrievalResult, SourceDocument } from "./types";
 
 const API_ROOT = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
 
@@ -8,12 +8,36 @@ export class ApiError extends Error {
   }
 }
 
+function apiErrorDetail(body: unknown): { code: string; message: string } {
+  const container = body && typeof body === "object" ? body as Record<string, unknown> : {};
+  const detail = container.error ?? container.detail ?? body;
+  if (Array.isArray(detail)) {
+    const messages = detail.slice(0, 5).map((item) => {
+      if (!item || typeof item !== "object") return String(item);
+      const issue = item as Record<string, unknown>;
+      const location = Array.isArray(issue.loc) ? issue.loc.filter((part) => part !== "body").join(".") : "";
+      const message = typeof issue.msg === "string" ? issue.msg : "Invalid value";
+      return location ? `${location}: ${message}` : message;
+    });
+    return { code: "VALIDATION_ERROR", message: messages.join("; ") || "Request validation failed" };
+  }
+  if (typeof detail === "string") return { code: "REQUEST_FAILED", message: detail };
+  if (detail && typeof detail === "object") {
+    const value = detail as Record<string, unknown>;
+    return {
+      code: typeof value.code === "string" ? value.code : "REQUEST_FAILED",
+      message: typeof value.message === "string" ? value.message : "Request failed",
+    };
+  }
+  return { code: "REQUEST_FAILED", message: "Request failed" };
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_ROOT}${path}`, { ...init, cache: "no-store" });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    const detail = body.error ?? body.detail ?? body;
-    throw new ApiError(response.status, detail.code ?? "REQUEST_FAILED", detail.message ?? "Request failed");
+    const detail = apiErrorDetail(body);
+    throw new ApiError(response.status, detail.code, detail.message);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -23,13 +47,15 @@ async function requestText(path: string): Promise<string> {
   const response = await fetch(`${API_ROOT}${path}`, { cache: "no-store" });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    const detail = body.error ?? body.detail ?? body;
-    throw new ApiError(response.status, detail.code ?? "REQUEST_FAILED", detail.message ?? "Request failed");
+    const detail = apiErrorDetail(body);
+    throw new ApiError(response.status, detail.code, detail.message);
   }
   return response.text();
 }
 
-const isOperation = (value: unknown): value is OperationAccepted => Boolean(value && typeof value === "object" && "job_id" in value);
+export const isOperationAccepted = (value: unknown): value is OperationAccepted => Boolean(
+  value && typeof value === "object" && "job_id" in value && "status_url" in value,
+);
 
 async function waitForJob(receipt: OperationAccepted, timeoutMs = 300_000): Promise<BackgroundJob> {
   const started = Date.now();
@@ -115,7 +141,7 @@ export const api = {
   getChunk: (id: string) => request<Chunk>(`/chunks/${id}`),
   parseDocument: async (id: string) => {
     const result = await request<SourceDocument | OperationAccepted>(`/documents/${id}/parse`, { method: "POST" });
-    if (isOperation(result)) await waitForJob(result);
+    if (isOperationAccepted(result)) await waitForJob(result);
     return api.getDocument(id);
   },
   getArtifacts: (id: string) => request<Artifact[]>(`/documents/${id}/artifacts`),
@@ -123,7 +149,7 @@ export const api = {
   getChunks: (versionId: string, chunkerId?: string) => request<Chunk[]>(`/corpus-versions/${versionId}/chunks?limit=500${chunkerId ? `&chunker_id=${encodeURIComponent(chunkerId)}` : ""}`),
   chunkVersion: async (id: string, body: Record<string, unknown>) => {
     const result = await request<Chunk[] | OperationAccepted>(`/corpus-versions/${id}/chunk`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    if (isOperation(result)) await waitForJob(result);
+    if (isOperationAccepted(result)) await waitForJob(result);
     return api.getChunks(id);
   },
   indexVersion: async (id: string) => {
@@ -131,8 +157,11 @@ export const api = {
     await waitForJob(result);
     return api.getIndexStatus(id);
   },
+  getJob: (id: string) => request<BackgroundJob>(`/jobs/${id}`),
+  cancelJob: (id: string) => request<BackgroundJob>(`/jobs/${id}/cancel`, { method: "POST" }),
   getIndexStatus: (id: string) => request<IndexStatus[]>(`/corpus-versions/${id}/index-status`),
   listPipelines: () => request<PipelineConfiguration[]>("/pipeline-configurations"),
+  listProviderCapabilities: () => request<ProviderCapability[]>("/provider-capabilities"),
   createPipeline: (body: Record<string, unknown>) => request<PipelineConfiguration>("/pipeline-configurations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
   freezePipeline: (id: string) => request<PipelineConfiguration>(`/pipeline-configurations/${id}/freeze`, { method: "POST" }),
   createQueryRun: (body: Record<string, unknown>) => request<QueryRun>("/query-runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
@@ -146,7 +175,7 @@ export const api = {
     const result = await request<EvaluationBundle | OperationAccepted>(`/query-runs/${id}/evaluation`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ metric_versions: metricVersions ?? null }),
     });
-    if (isOperation(result)) await waitForJob(result);
+    if (isOperationAccepted(result)) await waitForJob(result);
     return api.getRunEvaluation(id);
   },
   addHumanEvaluation: (id: string, body: { metric_name: string; metric_value: number | null; reviewer_label: string; reviewer_note?: string }) =>
@@ -182,13 +211,14 @@ export const api = {
     strategy: "baseline" | "retrieval_assisted";
     provider: "fake" | "gemini" | "openai_compatible";
     model?: string;
-  }) => {
-    const result = await request<ExtractionJob | OperationAccepted>(`/documents/${documentId}/extract-datasets`, {
+  }, options: { wait?: boolean; timeoutSeconds?: number } = {}) => {
+    const query = new URLSearchParams({ wait: String(options.wait ?? false) });
+    if (options.timeoutSeconds !== undefined) query.set("timeout_seconds", String(options.timeoutSeconds));
+    const result = await request<ExtractionJob | OperationAccepted>(`/documents/${documentId}/extract-datasets?${query}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (isOperation(result)) await waitForJob(result);
     return result;
   },
   listDatasetRecords: (filters: Record<string, string> = {}) => {
@@ -289,12 +319,24 @@ export const api = {
     request<ExperimentCostEstimate>(`/experiments/${id}/estimate`, { method: "POST" }),
   freezeExperiment: (id: string) =>
     request<Experiment>(`/experiments/${id}/freeze`, { method: "POST" }),
-  startExperiment: (id: string) =>
-    request<ExperimentExecutionReport | OperationAccepted>(`/experiments/${id}/start`, { method: "POST" }).then(async (report) => { if(isOperation(report)) { await waitForJob(report); return api.getExperiment(id); } return { ...report.experiment, progress: report.progress }; }),
-  resumeExperiment: (id: string) =>
-    request<ExperimentExecutionReport | OperationAccepted>(`/experiments/${id}/resume`, { method: "POST" }).then(async (report) => { if(isOperation(report)) { await waitForJob(report); return api.getExperiment(id); } return { ...report.experiment, progress: report.progress }; }),
+  startExperiment: (id: string, options: { wait?: boolean; timeoutSeconds?: number } = {}) => {
+    const query = new URLSearchParams({ wait: String(options.wait ?? false) });
+    if (options.timeoutSeconds !== undefined) query.set("timeout_seconds", String(options.timeoutSeconds));
+    return request<ExperimentExecutionReport | OperationAccepted>(`/experiments/${id}/start?${query}`, { method: "POST" })
+      .then((report) => isOperationAccepted(report) ? report : { ...report.experiment, progress: report.progress });
+  },
+  resumeExperiment: (id: string, options: { wait?: boolean; timeoutSeconds?: number } = {}) => {
+    const query = new URLSearchParams({ wait: String(options.wait ?? false) });
+    if (options.timeoutSeconds !== undefined) query.set("timeout_seconds", String(options.timeoutSeconds));
+    return request<ExperimentExecutionReport | OperationAccepted>(`/experiments/${id}/resume?${query}`, { method: "POST" })
+      .then((report) => isOperationAccepted(report) ? report : { ...report.experiment, progress: report.progress });
+  },
   pauseExperiment: (id: string) => request<Experiment>(`/experiments/${id}/pause`, { method: "POST" }),
-  generateExperimentExports: async (id: string) => { const operation = await request<OperationAccepted>(`/experiments/${id}/exports`, { method: "POST" }); await waitForJob(operation); },
+  generateExperimentExports: (id: string, options: { wait?: boolean; timeoutSeconds?: number } = {}) => {
+    const query = new URLSearchParams({ wait: String(options.wait ?? false) });
+    if (options.timeoutSeconds !== undefined) query.set("timeout_seconds", String(options.timeoutSeconds));
+    return request<OperationAccepted>(`/experiments/${id}/exports?${query}`, { method: "POST" });
+  },
   getExperimentResults: (id: string, filters?: Partial<ExperimentResultsFilters>, offset = 0, limit = 500) => {
     const query = new URLSearchParams({ offset: String(offset), limit: String(limit) });
     for (const value of filters?.pipeline_configuration_ids ?? []) query.append("pipeline_configuration_id", value);

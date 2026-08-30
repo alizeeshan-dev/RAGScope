@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { StatusBadge } from "@/components/StatusBadge";
 import { api } from "@/lib/api";
 import type { EvaluationBundle, FailureAttribution, HumanReviewQueueItem, ObservableTraceExport, QueryRun, RunClaim, RunContextSource, RunRetrievalResult, TraceSpan } from "@/lib/types";
+import styles from "../laboratory.module.css";
 
 type RankedChunk = {
   chunkId: string;
@@ -257,13 +258,13 @@ export default function LaboratoryRunPage() {
     finally { setEvaluating(false); }
   }
 
-  if (!run || !trace) return <main className="shell"><a className="back" href="/laboratory">← Query Laboratory</a>{error ? <div role="alert" className="alert">{error}</div> : <p aria-live="polite">Loading observable execution…</p>}</main>;
+  if (!run || !trace) return <main className={`${styles.runPage} shell`}><a className="back" href="/laboratory">← Query Laboratory</a>{error ? <div role="alert" className="alert">{error}</div> : <p aria-live="polite">Loading observable execution…</p>}</main>;
 
   const generationSpan = trace.spans.find((span) => span.span_type === "generation");
   const generationMetadata = run.generation_metadata ?? {};
   return <>
     <header className="topbar"><a className="brand" href="/"><span className="brand-mark">R</span><div><strong>RAGScope</strong><small>Query Laboratory</small></div></a><nav className="top-nav"><a href="/laboratory">New query</a><StatusBadge status={run.status} /></nav></header>
-    <main id="main" className="shell laboratory-shell">
+    <main id="main" className={`${styles.runPage} shell laboratory-shell`}>
       <a className="back" href="/laboratory">← New laboratory query</a>
       {reviewNavigation && <nav className="lab-section-nav" aria-label="Human review navigation"><a href={`/experiments/${reviewNavigation.experimentId}/review`}>← Review queue</a><span>Review {reviewNavigation.position} of {reviewNavigation.total}</span>{reviewNavigation.previous ? <a href={`/laboratory/${reviewNavigation.previous.query_run_id}?review=1&experiment=${reviewNavigation.experimentId}&position=${reviewNavigation.position - 1}&total=${reviewNavigation.total}`}>← Previous run</a> : <span>First queued run</span>}{reviewNavigation.next ? <a href={`/laboratory/${reviewNavigation.next.query_run_id}?review=1&experiment=${reviewNavigation.experimentId}&position=${reviewNavigation.position + 1}&total=${reviewNavigation.total}`}>Next run →</a> : <span>Last loaded run</span>}</nav>}
       <section className="lab-run-header"><div><p className="eyebrow">Observable execution trace</p><h1>{run.query_text}</h1><p>Run <code>{run.id}</code> · schema <code>{trace.schema_version}</code></p></div>{run.failure_code && <div className="failure-callout" role="alert"><strong>Pipeline failed</strong><span>{run.failure_code}</span><p>{run.failure_message ?? "Successful earlier stages remain available below."}</p></div>}</section>
