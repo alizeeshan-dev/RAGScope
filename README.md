@@ -1,256 +1,180 @@
+<div align="center">
+
 # RAGScope
 
 **An observable and adaptive retrieval-augmented generation evaluation platform for scientific dataset discovery.**
 
-RAGScope is a local research system for studying how evidence moves through a retrieval-augmented generation (RAG) pipeline. It ingests scientific documents, executes controlled retrieval and generation configurations, preserves the observable execution path, and evaluates where evidence or answer quality is lost.
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
+![pgvector](https://img.shields.io/badge/pgvector-enabled-336791)
 
-This repository contains the research platform and deterministic engineering fixtures. It does **not** contain a completed main scientific experiment, and it makes no claim that one pipeline is universally superior.
+[Overview](#overview) · [Research](#research-design) · [Architecture](#architecture) · [Usage](#usage) · [Results](#current-results-status) · [Documentation](#documentation)
 
-## Research problem
+</div>
 
-Most document-question-answering systems expose a final response but provide insufficient evidence to determine whether an error originated in parsing, retrieval, reranking, context selection, generation, or citation handling. This makes pipeline comparison difficult and can hide trade-offs between answer quality, latency, and cost.
+## Overview
 
-RAGScope addresses the primary research question defined in the project specification:
+RAGScope is a full-stack research prototype for investigating how evidence moves through scientific-document RAG pipelines. It ingests papers and dataset documentation, executes controlled retrieval and generation configurations, preserves the observable execution path, and evaluates where evidence or answer quality is lost.
+
+Most document-question-answering systems expose a final response without enough information to determine whether an error originated in parsing, retrieval, reranking, context selection, generation, or citation handling. RAGScope separates those stages and stores the evidence needed to inspect them independently.
+
+The system is not a general-purpose chatbot and does not expose hidden model reasoning. It records an **observable pipeline trace**: inputs, configuration snapshots, rankings, selected context, provider output, claims, citations, metrics, and failures.
+
+## Research question
 
 > How do retrieval strategy, reranking, context construction, and adaptive routing affect evidence retrieval, answer faithfulness, citation quality, latency, and cost in scientific-document RAG?
 
-The platform separates retrieval quality from generation quality, records exact research conditions, and evaluates results against human-authored benchmark evidence rather than hidden model state.
-
-## What the system does
-
-```text
-scientific files
-  -> validation and content-hashed storage
-  -> parsing, elements, chunks, lexical/dense indexes
-  -> frozen corpus version
-
-question
-  -> normalization, classification, optional rewriting
-  -> fixed pipeline or deterministic adaptive route
-  -> lexical/dense retrieval -> optional RRF -> optional reranking
-  -> deduplicated, token-budgeted context with stable source IDs
-  -> structured grounded generation -> claims and citations
-  -> observable trace -> metrics -> failure attribution
-
-frozen corpus + benchmark + pipelines
-  -> experiment run matrix -> immutable raw runs
-  -> denominator-aware aggregation -> CSV/JSON exports and figures
-```
-
-The same query orchestrator executes fixed and adaptive routes. Adaptive routing selects a persisted runtime route without modifying frozen pipeline configurations or creating a second RAG implementation.
+The associated study design examines when lexical, dense, hybrid, and reranked retrieval recover required evidence; whether that evidence survives context construction; whether the generator uses it correctly; and whether deterministic adaptive routing can reduce resource use without unacceptable quality loss.
 
 ## Core capabilities
 
-| Area | Implemented capability |
-| --- | --- |
-| Corpus and documents | Versioned corpora; bounded PDF/Markdown/text upload; content hashes; Docling-backed parsing; page/element/chunk provenance; fixed and structure-aware chunking |
-| Indexing and retrieval | PostgreSQL full-text retrieval using `ts_rank_cd`; dense cosine search with pgvector; document/year filters; corpus isolation; configurable Reciprocal Rank Fusion |
-| Pipelines | No retrieval, lexical, dense, hybrid, hybrid plus reranking, and deterministic adaptive routing; immutable configuration and prompt snapshots |
-| Reranking and context | Reorder-only reranking; preserved lexical/dense/fused/reranked ranks; deterministic deduplication; token budgets; selected/excluded evidence tracking |
-| Generation | Provider-independent structured output; deterministic fake provider; opt-in Gemini and OpenAI-compatible adapters; answerable, partially answerable, and unanswerable outcomes |
-| Evidence and tracing | Exact context and raw-response artifacts; ordered observable spans; claim-level citations; source resolution; redacted, versioned trace exports |
-| Research authoring | Dataset-metadata extraction with field evidence and correction history; benchmark questions, acceptable evidence sets, leakage warnings, review, and immutable versions |
-| Evaluation | Versioned retrieval, context, generation, citation, answerability, operational, and routing metrics; human and automatic labels remain distinct |
-| Failure analysis | Observable-stage taxonomy covering parsing, retrieval, reranking, context, generation, citation, and infrastructure failures; human overrides preserve automatic labels |
-| Experiments | Frozen dependency snapshots; deterministic question × pipeline × repetition matrix; PostgreSQL job queue; pause/resume; bounded retries; immutable raw results |
-| Analysis | Explicit denominators and missingness; evidence-survival and adaptive comparisons; run-level and aggregate CSV; versioned JSON; eight reproducible SVG/JSON figures |
-| Interface | Corpus Studio, Document Inspector, Pipeline Builder, Query Laboratory, Pipeline Comparison, Dataset Intelligence, Benchmark Authoring, Experiment Manager, and Results Dashboard |
+### Corpus and evidence preparation
 
-PostgreSQL lexical scores are not described as BM25. The portable fake embedding, generator, reranker, and judge implementations are deterministic test components, not substitutes for research-quality models.
+- Creates versioned corpora from bounded PDF, Markdown, and text uploads.
+- Stores source files and exact derived payloads in a content-addressed artifact store.
+- Parses page- and element-level provenance with Docling-backed PDF processing.
+- Supports fixed-token and structure-aware chunking.
+- Builds corpus-isolated PostgreSQL full-text and pgvector dense indexes.
 
-## Architecture and technology stack
+### RAG pipeline execution
 
-RAGScope has three persistence boundaries:
+- Runs no-retrieval, lexical, dense, hybrid, hybrid-plus-reranking, and adaptive configurations.
+- Uses configurable Reciprocal Rank Fusion for lexical and dense candidates.
+- Preserves lexical, dense, fused, and reranked ranks instead of overwriting earlier stages.
+- Applies deterministic context deduplication and token budgeting with selected/excluded tracking.
+- Produces typed grounded answers with `answerable`, `partially_answerable`, or `unanswerable` outcomes.
+- Resolves stable citation IDs to exact chunks, documents, pages, and cited passages.
 
-1. SQLAlchemy-managed relational state in PostgreSQL/pgvector (SQLite is supported for portable development tests).
-2. Immutable, content-addressed artifact files for large or exact payloads.
-3. Frozen version records for corpora, prompts, pipelines, routers, benchmarks, metrics, and experiments.
+### Research instrumentation
 
-| Layer | Technology |
-| --- | --- |
-| API and services | Python 3.12, FastAPI, Pydantic Settings, SQLAlchemy 2, Alembic |
-| Database | PostgreSQL 16, pgvector; SQLite for deterministic portable tests |
-| Background execution | PostgreSQL-backed worker queue with leases, attempts, idempotency, cancellation, and `FOR UPDATE SKIP LOCKED` claiming |
-| Parsing | Docling, with deterministic text/Markdown fixture paths |
-| Model providers | Deterministic fake providers; Gemini generation and embeddings; OpenAI-compatible generation; optional local Sentence Transformers CrossEncoder |
-| Frontend | Next.js 16, React 19, TypeScript 5, CSS Modules |
-| Verification | pytest, Ruff, mypy, ESLint, Next.js type/build checks, Playwright |
-| Local deployment | Docker Compose services: `db`, `api`, `worker`, and `web` |
+- Records ordered stage spans, latency, configuration snapshots, failures, and artifact references.
+- Provides Query Laboratory and side-by-side comparison for two to four frozen pipelines.
+- Extracts scientific dataset metadata with field-level evidence and preserved correction history.
+- Supports human-authored benchmark questions, acceptable evidence sets, leakage warnings, review, and immutable benchmark versions.
+- Computes versioned retrieval, context, generation, citation, answerability, operational, and routing metrics.
+- Attributes observable failures to parsing, retrieval, reranking, context, generation, citation, or infrastructure stages.
+- Executes resumable experiment matrices through a PostgreSQL-backed worker queue.
+- Produces denominator-aware analysis, run-level and aggregate CSV, versioned JSON, and reproducible figure artifacts.
 
-Routes validate transport data and delegate to application services. Long operations return a typed HTTP `202` job receipt and execute in the worker with a fresh database session. Provider credentials remain environment-only and are not returned to the browser.
+## Architecture
 
-See [Architecture](docs/ARCHITECTURE.md) for component responsibilities, versioning rules, trace semantics, and security boundaries.
+```mermaid
+flowchart LR
+    A[Scientific documents] --> B[Validate, parse, and chunk]
+    B --> C[(PostgreSQL + pgvector)]
+    B --> D[Content-addressed artifacts]
 
-## Experimental methodology
+    E[Question] --> F[Normalize, classify, optionally rewrite]
+    F --> G{Fixed or adaptive route}
+    C --> H[Retrieve, fuse, and optionally rerank]
+    G --> H
+    H --> I[Deduplicate and budget context]
+    I --> J[Structured generation]
+    J --> K[Claims and citations]
+    D --> L[Observable trace]
+    H --> L
+    I --> L
+    K --> L
 
-The intended controlled study compares these frozen conditions:
-
-| Condition | Retrieval and routing |
-| --- | --- |
-| P0 — No RAG | Generator receives no corpus evidence |
-| P1 — Lexical | PostgreSQL full-text retrieval, no reranker |
-| P2 — Dense | pgvector cosine retrieval, no reranker |
-| P3 — Hybrid | Lexical and dense retrieval with Reciprocal Rank Fusion |
-| P4 — Hybrid + reranking | Hybrid candidates followed by a configured reranker |
-| P5 — Adaptive | Versioned deterministic router selects only allowed, available settings |
-
-A valid experiment references one frozen corpus version, one frozen human-reviewed benchmark version, frozen pipelines, exact prompt/model/index/router/metric versions, repetitions, pricing, retry policy, and a code commit. Every benchmark question × pipeline × repetition cell creates an independent `QueryRun` with a deterministic identity.
-
-Human benchmark evidence is primary ground truth. Answerable questions require at least one acceptable evidence set; unanswerable questions require a reviewed explanation. Alternative evidence sets are OR alternatives, while evidence items within a set are jointly required.
-
-Implemented measurements include:
-
-- retrieval Recall@k, Precision@k, reciprocal rank, nDCG@k, evidence-set completeness, and required-document recall;
-- context precision/recall, required-evidence retention, redundancy, source diversity, and token count;
-- human-labelled correctness, completeness, abstention, unsupported claims, and contradictions;
-- citation existence, precision, recall, support, and completeness;
-- latency, token use, configured cost, provider calls, and infrastructure failures; and
-- adaptive-route distribution and quality/resource deltas against an explicitly selected fixed baseline.
-
-Missing annotations or prices remain null; they are never converted to zero. Aggregates record their numerator or median input, denominator/sample size, missing count, infrastructure-excluded count, and contributing run identifiers. Research-quality failures remain results and are not retried or excluded as infrastructure failures.
-
-The exact metric definitions and study controls are documented in [Methodology](docs/METHODOLOGY.md). Export-to-report rules are in [Report inputs](docs/REPORT_INPUTS.md).
-
-## Results status
-
-No final corpus, frozen 50–100-question human benchmark, real-provider pilot, or main experiment is present in the tracked research documentation. Consequently, there are no valid pipeline rankings, effect sizes, latency/cost comparisons, or scientific conclusions to report.
-
-The repository does include a deterministic engineering workflow with verified dimensions:
-
-- 2 synthetic Markdown documents containing a table, missing fact, contradiction, distractor, and prompt-injection text;
-- 6 frozen fake-provider conditions (P0–P5);
-- 5 reviewed fixture questions;
-- 30 experiment cells (5 questions × 6 pipelines × 1 repetition); and
-- 8 generated figure specifications/figures plus a manifest.
-
-These outputs validate orchestration and reproducibility mechanics only. They are not empirical findings. Generated figures are content-addressed or written beneath ignored artifact directories; no main-result screenshots or charts are committed for inclusion in this README.
-
-On 2026-09-09, the portable backend suite completed with **232 tests passed and 2 PostgreSQL-specific tests skipped** because `RAGSCOPE_POSTGRES_TEST_URL` was not configured for that invocation. The maintained QA record documents a separate PostgreSQL-backed run in which all 234 tests passed. See [Gemini QA handoff](docs/GEMINI_QA.md) for the environment and remaining independent checks.
-
-## Setup
-
-### Docker Compose
-
-Requirements: Docker Desktop with Compose.
-
-```powershell
-Copy-Item .env.example .env
-docker compose up --build
+    M[Frozen corpus, benchmark, and pipelines] --> N[Experiment runner]
+    L --> N
+    N --> O[Metrics and failure attribution]
+    O --> P[Exports, figures, and dashboard]
 ```
 
-Open:
+RAGScope separates three persistence concerns:
 
-- UI: `http://localhost:3000`
-- OpenAPI documentation: `http://localhost:8000/docs`
-- API health: `http://localhost:8000/health`
+1. **Relational research state** in SQLAlchemy-managed PostgreSQL/pgvector. SQLite supports deterministic portable tests.
+2. **Exact and large payloads** in immutable, content-addressed artifact storage.
+3. **Research conditions** in frozen corpus, prompt, pipeline, router, benchmark, metric, and experiment versions.
 
-Verify the services and queue:
+FastAPI routes validate transport data and delegate to application services. The `QueryOrchestrator` is the single execution path for fixed and adaptive runs. Long operations return a typed HTTP `202` receipt and execute through a separate PostgreSQL worker. The Next.js client uses typed API contracts and does not receive provider credentials.
 
-```powershell
-docker compose ps
-docker compose logs worker --tail 50
-docker compose exec db psql -U ragscope -d ragscope `
-  -c "select status, count(*) from jobs group by status order by status;"
+### Technology stack
+
+| Layer                   | Technologies                                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Frontend                | Next.js 16, React 19, TypeScript 5, CSS Modules                                                                           |
+| API and domain services | Python 3.12, FastAPI, Pydantic Settings, SQLAlchemy 2                                                                     |
+| Database and migrations | PostgreSQL 16, pgvector, Alembic                                                                                          |
+| Background execution    | PostgreSQL job queue, leases, attempts, cancellation, `FOR UPDATE SKIP LOCKED`                                            |
+| Document processing     | Docling; deterministic text and Markdown fixture parsers                                                                  |
+| Retrieval               | PostgreSQL full-text search, portable TF-IDF, pgvector cosine similarity, Reciprocal Rank Fusion                          |
+| Model providers         | Deterministic fake providers, Gemini generation and embeddings, OpenAI-compatible generation, optional local CrossEncoder |
+| Evaluation              | Versioned metric registry, citation verifier, failure taxonomy, adaptive-router analysis                                  |
+| Verification            | pytest, Ruff, mypy, ESLint, TypeScript, Next.js build checks, Playwright                                                  |
+| Local runtime           | Docker Compose services: `db`, `api`, `worker`, `web`                                                                     |
+
+PostgreSQL lexical ranking uses `ts_rank_cd`; it is not labelled as BM25. PostgreSQL dense retrieval uses exact cosine search through pgvector. Fake embedding, generation, reranking, and judging implementations are deterministic engineering tools, not research-quality semantic models.
+
+## Research design
+
+### Pipeline conditions
+
+| Condition                   | Configuration                                                                |
+| --------------------------- | ---------------------------------------------------------------------------- |
+| **P0 — No RAG**             | Generation without corpus evidence                                           |
+| **P1 — Lexical**            | PostgreSQL full-text retrieval without reranking                             |
+| **P2 — Dense**              | pgvector cosine retrieval without reranking                                  |
+| **P3 — Hybrid**             | Lexical and dense retrieval combined with Reciprocal Rank Fusion             |
+| **P4 — Hybrid + reranking** | Hybrid candidates reordered by the configured reranker                       |
+| **P5 — Adaptive**           | A versioned deterministic router selects only allowed and available settings |
+
+A valid experiment references one frozen corpus, one frozen human-reviewed benchmark, frozen pipeline configurations, exact prompt/model/index/router/metric versions, repetitions, retry policy, pricing configuration, and a code commit. The run matrix is:
+
+```text
+benchmark questions × pipeline configurations × repetitions
 ```
 
-PostgreSQL is exposed on host port `5433`; a host `psql` installation is not required. Database and artifact data are kept in named Docker volumes. Do not remove those volumes before exporting or backing up a study.
+Every matrix cell creates an independent `QueryRun` with a deterministic identity. Resume preserves completed cells. Only documented infrastructure failures are retryable; poor retrieval, unsupported claims, incorrect answers, and failed abstention remain research outcomes.
 
-The defaults use deterministic fake providers and require no API key. For opt-in Gemini generation and embeddings, edit only the untracked root `.env`:
+### Human ground truth
 
-```dotenv
-RAGSCOPE_GENERATION_PROVIDER=gemini
-RAGSCOPE_EMBEDDING_PROVIDER=gemini
-RAGSCOPE_GEMINI_API_KEY=<local secret>
-RAGSCOPE_GEMINI_MODEL=gemini-2.5-flash
-RAGSCOPE_GEMINI_EMBEDDING_MODEL=gemini-embedding-001
-```
+Human benchmark annotations are primary ground truth. Answerable questions require at least one reviewed acceptable evidence set. Unanswerable questions require a reviewed explanation and do not require fabricated source references. Model suggestions and automatic judgments remain separate from human-reviewed values.
 
-Never commit `.env` or place credentials in prompts, benchmark notes, frontend forms, or experiment metadata. Token pricing is configured separately as decimal currency units per one million tokens; blank means unavailable, not zero. See [Reproducibility](docs/REPRODUCIBILITY.md) for the complete environment contract.
+Alternative evidence sets are treated as OR alternatives. Evidence items within one set are jointly required. This avoids penalizing a run for retrieving one complete valid evidence route rather than every possible alternative.
 
-### Local development
+### Evaluation
 
-Requirements: Python 3.12+, Node.js 22+, and PowerShell for the commands below.
+| Scope            | Implemented measurements                                                                                                      |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Retrieval        | Recall@k, Precision@k, reciprocal rank, nDCG@k, evidence-set completeness, required-document recall                           |
+| Context          | Precision, recall, required-evidence retention, redundancy, source diversity, token count                                     |
+| Generation       | Human correctness and completeness, abstention behavior, unsupported claims, contradictions, secondary semantic/judge outputs |
+| Citations        | Existence, precision, recall, claim support, completeness                                                                     |
+| Operations       | Total and stage latency, input/output tokens, configured cost, provider calls, infrastructure failures                        |
+| Adaptive routing | Route distribution, calls avoided, token/cost/latency differences, quality delta against an explicit fixed reference          |
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[dev,pdf]"
-Copy-Item .env.example .env
-$env:RAGSCOPE_DATABASE_URL = "sqlite:///./ragscope.db"
-$env:RAGSCOPE_ARTIFACT_ROOT = (New-Item -ItemType Directory -Force ".\var\artifacts").FullName
-.\.venv\Scripts\alembic.exe upgrade head
-.\.venv\Scripts\uvicorn.exe backend.app.main:app --reload
-```
-
-In a second terminal:
-
-```powershell
-Set-Location frontend
-npm install
-npm run dev
-```
-
-SQLite is suitable for deterministic development, not for claims about PostgreSQL full-text or pgvector behavior.
+Missing labels and unknown prices remain null rather than becoming zero. Aggregates expose sample size, denominator, missing count, infrastructure-excluded count, and contributing QueryRun IDs. Exact definitions are documented in [Methodology](docs/METHODOLOGY.md).
 
 ## Usage
 
-The normal UI workflow is:
-
-1. In **Corpus Studio**, create a corpus/version, upload documents, parse them, generate chunks, build the required indexes, review warnings, and freeze the ready version.
-2. In **Pipeline Builder**, create and freeze fixed pipeline configurations and, if needed, a frozen router plus adaptive pipeline.
-3. In **Query Laboratory**, run individual questions and inspect rankings, context selection, exact context, traces, generation, claims, citations, metrics, and failure attribution.
-4. Use **Pipeline Comparison** to align two to four frozen configurations on the same corpus and original question.
-5. Use **Dataset Intelligence** for evidence-backed dataset extraction and field-level human review.
-6. Use **Benchmark Authoring** to create reviewed questions, stable acceptable evidence sets, and an immutable benchmark version.
-7. In **Experiment Manager**, create an experiment, inspect its cost estimate and dependencies, freeze it, start the worker-backed matrix, pause/resume if necessary, review human labels, and export results.
-8. Use the **Results Dashboard** to filter aggregates, inspect denominators, and drill into contributing QueryRuns.
-
-Long-running API operations return `202`. Poll `GET /api/v1/jobs/{job_id}` or use the UI’s job progress views. A bounded `wait=true&timeout_seconds=<1–60>` mode is available for compatibility and tests.
-
-### Deterministic PostgreSQL fixture
-
-With the Docker database running and a local development environment installed:
-
-```powershell
-$env:RAGSCOPE_DATABASE_URL = "postgresql+psycopg://ragscope:ragscope@localhost:5433/ragscope"
-$env:RAGSCOPE_ARTIFACT_ROOT = (New-Item -ItemType Directory -Force ".\var\fixture-artifacts").FullName
-.\.venv\Scripts\alembic.exe upgrade head
-.\.venv\Scripts\python.exe -m backend.app.fixture_workflow
-```
-
-The command is idempotent: rerunning it reuses the deterministic experiment identity instead of duplicating completed valid runs.
-
-### Verification
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest backend/tests -q -p no:cacheprovider
-.\.venv\Scripts\ruff.exe check backend
-.\.venv\Scripts\mypy.exe backend/app
-.\.venv\Scripts\alembic.exe upgrade head
-
-Set-Location frontend
-npm run typecheck
-npm run lint
-npm run build
-npm run e2e
-```
-
-Ordinary tests use fake providers and do not perform paid or network model calls. PostgreSQL-specific tests require `RAGSCOPE_POSTGRES_TEST_URL` and a migrated pgvector database.
+1. **Corpus Studio:** create a corpus version, upload documents, parse them, generate chunks, build indexes, inspect warnings, and freeze the ready version.
+2. **Pipeline Builder:** create and freeze fixed configurations; optionally create and freeze a router and adaptive pipeline.
+3. **Query Laboratory:** execute a question and inspect query processing, route selection, retrieval ranks, context decisions, exact context, generation, citations, metrics, and failures.
+4. **Pipeline Comparison:** compare two to four frozen pipelines on the same corpus and exact original question.
+5. **Dataset Intelligence:** extract dataset metadata, inspect field evidence, and preserve human accept/edit/reject/not-stated decisions.
+6. **Benchmark Authoring:** create questions, select stable source evidence, define acceptable alternatives, review annotations, and freeze the benchmark version.
+7. **Experiment Manager:** validate dependencies, estimate cost, freeze conditions, start the worker-backed matrix, pause/resume, inspect attempts, and request immutable exports.
+8. **Results Dashboard:** filter aggregates, inspect sample sizes and denominator changes, and drill down to contributing QueryRuns.
 
 ## Repository structure
 
 ```text
 backend/
   alembic/                 database migrations
-  app/                     API, domain services, providers, worker, analysis
-  tests/                   unit, API, integration, metric-gold, and PostgreSQL tests
+  app/                     API, services, providers, worker, evaluation, analysis
+  tests/                   unit, API, metric-gold, integration, PostgreSQL tests
 benchmark/
   fixtures/synthetic/      tracked deterministic evidence fixtures
-  fixtures/representative/ ignored local scientific papers for manual validation
-docs/                      architecture, methodology, QA, threats, report runbooks
+  fixtures/representative/ ignored local papers for manual parser validation
+docs/                      architecture, methodology, QA, validity, report runbooks
 frontend/
-  app/                     Next.js routes and research interfaces
-  components/              shared navigation and document/evidence components
-  lib/                     typed API client and frontend contracts
+  app/                     Next.js research interfaces
+  components/              shared navigation and evidence-inspection components
+  lib/                     typed API client and browser-side contracts
   tests/e2e/               Playwright critical workflows
 scripts/
   fixtures/                synthetic PDF generation
@@ -260,19 +184,13 @@ docker-compose.yml
 .env.example
 ```
 
-The documentation index is [docs/README.md](docs/README.md). The complete clean-checkout and experiment workflow is [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md).
+## Security boundaries
 
-## Limitations and future work
+- Uploaded and retrieved documents are treated as untrusted data in generation and extraction prompts.
+- Document text cannot trigger browsing, code execution, tools, or external actions.
+- Provider credentials are loaded from environment-backed settings and excluded from frontend payloads and frozen snapshots.
+- Recursive redaction is applied to nested trace, configuration, error, artifact, and export data before persistence.
+- Artifact access uses database identifiers and configured-root containment rather than caller-supplied filesystem paths.
+- Human labels remain separate from model suggestions and automatic judgments.
 
-- The final scientific corpus, human-reviewed benchmark, real-provider pilot, main experiment, case studies, and report findings still require human research input and execution.
-- The deterministic citation verifier uses lexical overlap; it is not full natural-language entailment. Model-assisted judgments are secondary and require separate validation against human labels.
-- Some automatic failure-taxonomy signals are not yet derived from stored evidence, so defined categories can remain unassigned without human review.
-- Long non-experiment worker handlers do not renew their lease periodically during one large operation; work exceeding the configured lease can be reclaimed and should be addressed before large production runs.
-- The cost guard rejects complete estimates above the configured ceiling, but execution is not mechanically conditioned on a separately stored human approval record; paid studies require a documented manual gate.
-- PostgreSQL dense search is exact cosine search. No dimension-specific HNSW or IVFFlat index is created.
-- PDF parsing quality depends on Docling and source layout; OCR, tables, reading order, and unusual encodings require document-level review.
-- Authentication, multi-tenancy, cloud deployment, GraphRAG, corpus-poisoning studies, and multi-turn RAG are outside the implemented scope.
-- The local CrossEncoder dependency is optional and disabled in the default Docker build; its model revision must be pinned and cached for a reproducible reranking study.
-- Secret redaction is applied before persistence, but final research packages should also be scanned independently across tracked and generated files.
-
-Appropriate next work is to close the worker-lease and paid-execution gates, validate citation/failure judgments, freeze the real corpus and benchmark, execute an approved pilot, and only then run the main experiment. Study-specific threats are maintained in [Threats to validity](docs/THREATS_TO_VALIDITY.md).
+These controls reduce specific risks; they are not a claim that the platform is secure against every adversarial document or deployment threat.
