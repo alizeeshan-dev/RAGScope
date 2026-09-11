@@ -170,7 +170,7 @@ backend/
 benchmark/
   fixtures/synthetic/      tracked deterministic evidence fixtures
   fixtures/representative/ ignored local papers for manual parser validation
-docs/                      architecture, methodology, QA, validity, report runbooks
+docs/                      architecture, methodology, validity, research runbooks
 frontend/
   app/                     Next.js research interfaces
   components/              shared navigation and evidence-inspection components
@@ -179,7 +179,6 @@ frontend/
 scripts/
   fixtures/                synthetic PDF generation
   research/                deterministic research-figure generation
-ragscope-project-specification.md
 docker-compose.yml
 .env.example
 ```

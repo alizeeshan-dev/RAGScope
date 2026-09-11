@@ -1,6 +1,8 @@
 .env
 .env.*
 !.env.example
+
+# Python caches and local environments
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -10,19 +12,48 @@ __pycache__/
 htmlcov/
 .venv/
 venv/
+
+# Frontend dependencies and generated output
 node_modules/
 .next/
 .next-*/
 frontend/out/
 frontend/test-results/
 frontend/playwright-report/
-artifacts/
-var/
-data/
-scratch/
+
+# Runtime, test, and research output
+/artifacts/
+/var/
+/data/
+/scratch/
+/tmp/
+*.log
+*.tmp
+*.bak
+*.swp
+
+# Private and locally supplied research material
 benchmark/fixtures/private/
 benchmark/fixtures/representative/
 *.sqlite3
 *.db
+
+# Local AI/editor instructions and internal development handoffs
+**/AGENTS.md
+**/CLAUDE.md
+**/GEMINI.md
+**/CODEX.md
+**/.agents/
+**/.claude/
+**/.codex/
+**/.gemini/
+docs/GEMINI_QA.md
+docs/RESEARCH_REPORT.md
+ragscope-project-specification.md
+
+# IDE and operating-system metadata
+.idea/
+.vscode/
+*.code-workspace
 .DS_Store
 Thumbs.db
